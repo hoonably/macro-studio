@@ -1,0 +1,17 @@
+:root{color-scheme:light;font:13px/1.55 system-ui,-apple-system,sans-serif;color:#24354d;background:#fff}
+*{box-sizing:border-box}
+body{width:340px;margin:0}
+header{display:flex;align-items:center;gap:11px;padding:20px 20px 16px}
+header div{min-width:0}h1{font-size:16px;line-height:1.4;margin:0;font-weight:700;letter-spacing:-.02em}
+#site{font-size:12px;color:#728096;margin:3px 0 0;overflow-wrap:anywhere}
+main{padding:0 20px 18px}.setting{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 0 14px;border-top:1px solid #edf0f5}
+#toggle-label{font-size:14px;font-weight:600}
+button{font:inherit;cursor:pointer}button:disabled{cursor:default;opacity:.5}
+button:focus-visible{outline:3px solid #8bb9ff;outline-offset:3px}
+#site-toggle{display:flex;align-items:center;justify-content:space-between;gap:7px;width:76px;height:34px;padding:5px 6px 5px 10px;border:0;border-radius:20px;background:#e9edf3;color:#66758a;font-size:11px;font-weight:700}
+.knob{display:block;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #25355125;flex:none}
+#site-toggle[aria-checked="true"]{background:#145fc0;color:#fff}
+#status{min-height:40px;margin:0;color:#68788e;font-size:12px;line-height:1.7;white-space:pre-line}
+#status[data-error="true"]{color:#b42318}
+footer{padding:11px 20px;background:#f7f9fc;border-top:1px solid #edf0f5}
+footer button{padding:0;border:0;background:none;color:#61728a;font-size:12px}

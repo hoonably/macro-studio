@@ -1,6 +1,8 @@
 {
   "id": "unist",
   "name": "UNIST Portal",
+  "scriptId": "unist-travel",
+  "scriptName": "UNIST 국내출장 신청",
   "origins": [
     "https://portal.unist.ac.kr/*",
     "https://s4hana.unist.ac.kr/*"
@@ -15,6 +17,7 @@
         "core/config.js",
         "ui/launcher.js",
         "scripts/examples/unist-travel/preset.js",
+        "scripts/examples/unist-travel/inputs.js",
         "scripts/examples/unist-travel/config.js",
         "scripts/examples/unist-travel/navigation.js"
       ],
@@ -32,6 +35,7 @@
         "adapters/sap.js",
         "ui/launcher.js",
         "scripts/examples/unist-travel/preset.js",
+        "scripts/examples/unist-travel/inputs.js",
         "scripts/examples/unist-travel/config.js",
         "scripts/examples/unist-travel/fill.js",
         "scripts/examples/unist-travel/approval.js",

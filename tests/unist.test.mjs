@@ -4,7 +4,8 @@ import { context, load, tick } from './helpers.mjs';
 
 const configuration = { destination: '방문 지역', organization: '방문 기관', purpose: '업무 미팅', memo: '검토용 메모',
   approvalLine: '[출장] 예제 결재선', approvers: ['검토자A', '승인자B'] };
-const files = ['extension/core/namespace.js', 'extension/adapters/sap.js', 'scripts/examples/unist-travel/preset.js'];
+const files = ['extension/core/namespace.js', 'extension/adapters/sap.js',
+  'scripts/examples/unist-travel/preset.js', 'scripts/examples/unist-travel/inputs.js'];
 async function travel(config) {
   const env = context();
   await load(env.ctx, files[0]); env.window.MacroStudio.config = { unistTravel: config };
@@ -100,7 +101,8 @@ test('UNIST retains the input sequence, checks computed fields and stops on date
   await load(ctx, 'scripts/examples/unist-travel/fill.js');
   let values, calls = [], amount = '20,000', fail;
   helper.sap.connect = () => {
-    values = new Map([['diff_cp', '4.00'], ['tco_tvamt_cp', amount]]);
+    values = new Map([['diff_cp', '4.00'], ['tco_tvamt_cp', amount],
+      ['begho_cp', '13'], ['begmi_cp', '00'], ['endho_cp', '17'], ['endmi_cp', '00']]);
     return { runExclusive: (_name, action) => action(), ready: async () => {}, read: key => values.get(key),
       set: async (key, value) => { if (key === fail) throw new Error('응답 실패'); calls.push(key); values.set(key, value); } };
   };
@@ -142,6 +144,121 @@ test('approval flow selects and verifies the configured route and never presses 
   await assert.rejects(feature.prepareApproval(), /반영되지 않았습니다/);
   assert.deepEqual(actions, []);
   assert.equal(window.__macroStudioRunningTask, undefined);
+});
+
+test('per-run date and time inputs reject invalid values before navigation and leave shared defaults unchanged', async () => {
+  const env = await portalNavigation();
+  const original = JSON.stringify(env.feature.preset);
+  for (const [date, inputs] of [
+    ['2026.02.30', {}], ['2026.10.23', { startTime: '24:00' }],
+    ['2026.10.23', { startTime: '' }], ['2026.10.23', { startTime: '17:00', endTime: '17:00' }],
+    ['2026.10.23', { startTime: '17:00', endTime: '09:00' }]
+  ]) assert.throws(() => env.feature.runFromPortal(date, () => {}, inputs), /날짜|시간/);
+  assert.equal(env.messages.length, 0);
+  assert.equal(env.intervals.size, 0);
+  const trip = env.feature.resolveTrip('2026.10.23', { startTime: '09:30', endTime: '12:00' });
+  assert.equal(trip.preset.startHour, '09');
+  assert.equal(trip.preset.startMinute, '30');
+  assert.equal(trip.preset.endHour, '12');
+  assert.equal(trip.preset.expectedHours, 2.5);
+  assert.equal(trip.preset.expectedAmount, null, 'Do not guess a different-duration reimbursement rule');
+  assert.equal(env.feature.resolveTrip('2026.10.23', { startTime: '09:00', endTime: '13:00' }).preset.expectedAmount, 20000);
+  assert.equal(JSON.stringify(env.feature.preset), original);
+});
+
+test('portal bridge carries a snapshot of per-run times and private preset without changing the shared example', async () => {
+  const env = await portalNavigation();
+  const original = JSON.stringify(env.feature.preset);
+  const result = env.feature.runFromPortal('2026.10.23', () => {}, {
+    startTime: '09:30', endTime: '12:00', preset: { ...configuration, purpose: '개별 업무' }
+  });
+  await tick(); env.enterSAP();
+  [...env.intervals.values()][0]();
+  env.receive({ type: 'ready', instance: 'current-sap' });
+  const run = env.messages.find(item => item.message.type === 'run').message;
+  assert.equal(run.inputs.preset.startHour, '09');
+  assert.equal(run.inputs.preset.startMinute, '30');
+  assert.equal(run.inputs.preset.endHour, '12');
+  assert.equal(run.inputs.preset.purpose, '개별 업무');
+  assert.equal(run.inputs.preset.expectedAmount, null);
+  env.receive({ type: 'started', instance: run.instance, id: run.id });
+  env.receive({ type: 'complete', instance: run.instance, id: run.id });
+  assert.match(await result, /최종 결재상신을 직접/);
+  assert.equal(JSON.stringify(env.feature.preset), original);
+});
+
+test('variable-time filling keeps every intermediate time range valid and checks SAP calculations', async () => {
+  const { ctx, helper, feature } = await travel(configuration);
+  await load(ctx, 'scripts/examples/unist-travel/fill.js');
+  let amount = '10,000', fail, calls, initial = ['13', '00', '17', '00'];
+  helper.sap.connect = () => {
+    calls = [];
+    const values = new Map(['begho_cp', 'begmi_cp', 'endho_cp', 'endmi_cp'].map((key, index) => [key, initial[index]]));
+    return { runExclusive: (_name, action) => action(), ready: async () => {},
+      read: key => key === 'diff_cp' ? (Number(values.get('endho_cp')) + Number(values.get('endmi_cp')) / 60 -
+        Number(values.get('begho_cp')) - Number(values.get('begmi_cp')) / 60).toFixed(2) : key === 'tco_tvamt_cp' ? amount : values.get(key),
+      set: async (key, value) => {
+        calls.push(key);
+        if (key === fail) throw new Error('입력 실패');
+        values.set(key, value);
+        const start = Number(values.get('begho_cp')) * 60 + Number(values.get('begmi_cp'));
+        const end = Number(values.get('endho_cp')) * 60 + Number(values.get('endmi_cp'));
+        if (['begho_cp', 'begmi_cp', 'endho_cp', 'endmi_cp'].includes(key)) {
+          assert.ok(end > start, 'Never present SAP with an invalid intermediate time range');
+        }
+      }
+    };
+  };
+  const inputs = { startTime: '09:30', endTime: '12:00', preset: { ...configuration, purpose: '이번 업무' } };
+  const rows = await feature.fill('2026.10.23', () => {}, inputs);
+  assert.equal(rows.find(row => row.항목 === '출장시간').현재값, '2.50');
+  assert.equal(rows.find(row => row.항목 === '출장목적').현재값, '이번 업무');
+  assert.ok(calls.indexOf('begho_cp') < calls.indexOf('endho_cp'));
+  initial = ['00', '00', '00', '00'];
+  const rounded = await feature.fill('2026.10.23', () => {}, { ...inputs, startTime: '09:20' });
+  assert.equal(rounded.find(row => row.항목 === '출장시간').현재값, '2.67');
+  for (const invalid of ['', 'NaN', '-1', '오류']) {
+    amount = invalid;
+    await assert.rejects(feature.fill('2026.10.23', () => {}, inputs), /출장비총액/);
+  }
+  amount = '10,000'; fail = 'begho_cp';
+  await assert.rejects(feature.fill('2026.10.23', () => {}, inputs), /단계에서 중단/);
+  assert.ok(!calls.includes('zztrvlo_cp'));
+});
+
+test('SAP list forwards variable inputs, and an open approval popup refuses a different time', async () => {
+  const { ctx, helper, feature, document } = await travel(configuration);
+  document.body.innerHTML = '<button ct="B" lsdata=\'{"0":"신청"}\'>신청</button>';
+  let presses = 0, forwarded;
+  helper.sap.connectButton = () => ({ ready: async () => {}, press: async () => {
+    presses++;
+    document.body.innerHTML = '<input ct="I" data-cust-sid-main.begda_cp=""><button ct="B" lsdata=\'{"0":"신규 결재상신"}\'>신규 결재상신</button>';
+  } });
+  feature.run = async (...args) => { forwarded = args; };
+  await load(ctx, 'scripts/examples/unist-travel/bridge.js');
+  await assert.rejects(feature.runFromList('2026.10.23', () => {}, { startTime: '25:00' }), /시간/);
+  assert.equal(presses, 0);
+  const inputs = { startTime: '09:30', endTime: '12:00' };
+  await feature.runFromList('2026.10.23', () => {}, inputs);
+  assert.equal(presses, 1);
+  assert.equal(forwarded[2], inputs);
+  await load(ctx, 'scripts/examples/unist-travel/approval.js');
+  document.body.innerHTML = '<div role="dialog"><span ct="TV">결재상신을 하시겠습니까?</span></div>';
+  helper.sap.connect = () => ({ doc: document, read: key => ({ begda_cp: '2026.10.23',
+    begho_cp: '13', begmi_cp: '00', endho_cp: '17', endmi_cp: '00' })[key] });
+  let approved = false;
+  feature.prepareApproval = async () => { approved = true; };
+  await assert.rejects(feature.run('2026.10.23', () => {}, inputs), /날짜·시간/);
+  assert.equal(approved, false);
+  const existing = Object.fromEntries(feature.tripTasks('2026.10.23', feature.resolveTrip('2026.10.23', inputs).preset)
+    .map(([, key, value]) => [key, value]));
+  helper.sap.connect = () => ({ doc: document, read: key => existing[key] });
+  existing.zztrvpu = '다른 출장 목적';
+  await assert.rejects(feature.run('2026.10.23', () => {}, inputs), /입력값/);
+  assert.equal(approved, false);
+  existing.zztrvpu = configuration.purpose;
+  await feature.run('2026.10.23', () => {}, inputs);
+  assert.equal(approved, true);
 });
 test('SAP native adapter serializes actions and releases its lock even after errors', async () => {
   const { ctx, helper, document, window } = await travel(configuration);

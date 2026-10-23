@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>스크립트 보관함 · Macro Studio</title>
+  <link rel="stylesheet" href="studio.css"><link rel="stylesheet" href="library.css">
+</head>
+<body>
+  <header class="brand"><img src="../assets/icon-48.png" width="36" height="36" alt=""><div><strong>Macro Studio</strong><p>스크립트 보관함</p></div></header>
+  <main class="library-main">
+    <section class="intro"><span class="eyebrow">MY SCRIPTS</span><h1>필요한 작업만 꺼내 쓰세요.</h1><p>보관한 스크립트는 실행 목록에서 빠집니다. 다시 필요하면 복원하세요.</p></section>
+    <p id="library-status" role="status" aria-live="polite">스크립트를 불러오는 중…</p>
+    <section aria-labelledby="active-heading"><div class="section-heading"><h2 id="active-heading">사용 중</h2><span id="active-count" class="pill">0개</span></div><ul id="active-scripts" class="script-cards"></ul><p id="active-empty" class="empty" hidden>사용 중인 스크립트가 없습니다.</p></section>
+    <section aria-labelledby="archived-heading"><div class="section-heading"><h2 id="archived-heading">보관 중</h2><span id="archived-count" class="pill">0개</span></div><ul id="archived-scripts" class="script-cards"></ul><p id="archived-empty" class="empty" hidden>보관한 스크립트가 없습니다.</p></section>
+    <section class="library-help"><h2>보관과 삭제</h2><p>보관한 항목은 언제든 복원할 수 있습니다. 보관함에서도 삭제하면 이 확장 화면에서는 되돌릴 수 없습니다. 이미 실행 중인 작업은 계속 진행됩니다.</p><p>보관·삭제 상태는 브라우저 재시작과 확장 새로고침 후에도 유지됩니다. 저장소의 원본 파일과 개인 설정은 그대로 남습니다.</p></section>
+    <footer><a href="studio.html">새 자동화 만들기</a><a href="scripts.html">스크립트 폴더 연결·관리</a></footer>
+  </main>
+  <dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-description">
+    <h2 id="delete-title">보관함에서도 삭제할까요?</h2><p id="delete-name"></p><p id="delete-description">삭제하면 이 확장 화면에서는 복원할 수 없습니다. 저장소의 원본 파일은 유지됩니다.</p>
+    <div class="actions"><button id="cancel-delete" class="secondary" autofocus>취소</button><button id="confirm-delete" class="danger">삭제</button></div>
+  </dialog>
+  <script type="module" src="library.js"></script>
+</body></html>

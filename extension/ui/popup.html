@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Macro Studio</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header><img src="../assets/icon-48.png" width="32" height="32" alt=""><div><h1>Macro Studio</h1><p id="site">현재 사이트 확인 중…</p></div></header>
+  <main>
+    <div class="setting">
+      <span id="toggle-label">이 사이트에 적용</span>
+      <button id="site-toggle" type="button" role="switch" aria-checked="false" aria-labelledby="toggle-label" aria-describedby="status" disabled><span id="toggle-state">OFF</span><span class="knob" aria-hidden="true"></span></button>
+    </div>
+    <p id="status" role="status">잠시만 기다려 주세요.</p>
+  </main>
+  <footer><button id="scripts" type="button">스크립트 연결·관리 ↗</button></footer>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

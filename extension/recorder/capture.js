@@ -8,6 +8,12 @@
     if (!recordingId) return Promise.resolve();
     return chrome.runtime.sendMessage({ type: 'capture:event', recordingId, event }).catch(() => {});
   };
+  const setRecording = id => {
+    const next = id || null, changed = next !== recordingId;
+    recordingId = next;
+    if (!next) { for (const timer of pending.values()) clearTimeout(timer); pending.clear(); }
+    else if (changed) send({ action: 'navigation', page: { url: location.href, title: document.title } });
+  };
   const sensitive = element => ['password', 'hidden', 'file'].includes(element.type) ||
     /password|passwd|passcode|secret|token|authorization|api[-_ ]?key|otp|one[-_ ]?time|cc-|비밀번호|인증번호|카드번호/i.test(
       [element.name, element.id, element.autocomplete, element.getAttribute('aria-label')].join(' '));
@@ -70,13 +76,11 @@
   chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     if (message.type === 'capture:flush') { flush().then(() => respond({ ok: true })); return true; }
     if (message.type === 'capture:state') {
-      recordingId = message.recordingId || null;
-      if (!recordingId) { for (const timer of pending.values()) clearTimeout(timer); pending.clear(); }
+      setRecording(message.recordingId);
       respond({ ok: true });
     }
   });
   chrome.runtime.sendMessage({ type: 'capture:status' }).then(response => {
-    recordingId = response?.value?.recordingId || null;
-    if (recordingId) send({ action: 'navigation', page: { url: location.href, title: document.title } });
+    setRecording(response?.value?.recordingId);
   }).catch(() => {});
 })();

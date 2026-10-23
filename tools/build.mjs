@@ -32,13 +32,21 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
     js: entry.files.map(safeFile),
     world: entry.world, all_frames: !!entry.allFrames, run_at: 'document_idle'
   }));
+  const catalog = [{ id: profile.scriptId, name: profile.scriptName,
+    matches: [...new Set(content.flatMap(entry => entry.matches))] }];
+  if (!validId(profile.scriptId)) throw new Error('사이트 프로필의 스크립트 id를 확인하세요.');
   const localScripts = [];
+  // A fresh clone must be connectable before the user creates their first script.
+  if (!publicOnly) await fs.mkdir(path.join(root, 'local/scripts'), { recursive: true });
   if (!publicOnly) for (const id of await folders(path.join(root, 'local/scripts'))) {
     if (!validId(id)) throw new Error('잘못된 개인 스크립트 폴더: ' + id);
     const folder = path.join(root, 'local/scripts', id);
     const metadata = await readJSON(path.join(folder, 'script.json'));
     if (metadata.id !== id) throw new Error('스크립트 id와 폴더 이름이 다릅니다: ' + id);
     if (metadata.enabled === false) continue;
+    if (catalog.some(script => script.id === id)) throw new Error('중복된 스크립트 id: ' + id);
+    catalog.push({ id, name: String(metadata.name || id), bundled: true,
+      matches: [...new Set((metadata.entries || []).flatMap(entry => entry.matches || []).map(validateMatch))] });
     for (const entry of metadata.entries || []) {
       if (!['MAIN', 'ISOLATED'].includes(entry.world || 'ISOLATED')) throw new Error('지원하지 않는 실행 world');
       const adapters = entry.adapters || ['dom'];
@@ -70,6 +78,7 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
   let personal = null;
   const privateFile = path.join(root, 'local/profiles/unist-travel.json');
   if (!publicOnly && await exists(privateFile)) personal = await readJSON(privateFile);
+  if (personal?.name) catalog[0].name = String(personal.name);
   const output = path.join(root, publicOnly ? 'dist-public' : 'dist');
   const staging = output + '.building';
   await fs.rm(staging, { force: true, recursive: true });
@@ -84,11 +93,14 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
     }
     await fs.writeFile(path.join(staging, 'core/config.js'), '"use strict";\nwindow.MacroStudio.config = Object.freeze(' +
       JSON.stringify({ unistTravel: personal }) + ');\n');
+    await fs.writeFile(path.join(staging, 'core/script-catalog.json'), JSON.stringify(catalog, null, 2) + '\n');
     await fs.writeFile(path.join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     for (const entry of manifest.content_scripts) for (const file of entry.js) {
       if (!await exists(path.join(staging, safeFile(file)))) throw new Error('등록 파일이 없습니다: ' + file);
     }
-    for (const file of ['background.js', 'ui/studio.html', ...Object.values(manifest.icons)]) {
+    for (const file of ['background.js', 'core/script-library.js', 'core/site-settings.js', 'core/script-catalog.json', 'ui/studio.html',
+      manifest.action.default_popup, 'ui/popup.js', 'ui/popup.css',
+      'ui/library.html', 'ui/library.js', 'ui/library.css', 'ui/scripts.html', 'ui/scripts.js', 'scripts/runtime.js', ...Object.values(manifest.icons)]) {
       if (!await exists(path.join(staging, file))) throw new Error('확장 파일이 없습니다: ' + file);
     }
     await fs.rm(output, { recursive: true, force: true });

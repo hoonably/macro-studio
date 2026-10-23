@@ -21,7 +21,8 @@
   const send = (type, payload = {}) => window.top.postMessage({ channel: CHANNEL, type, instance, ...payload }, PORTAL);
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  async function runFromList(date, progress) {
+  async function runFromList(date, progress, inputs = {}) {
+    feature.resolveTrip(date, inputs); // Validate before opening a new application.
     if (!formReady()) {
       const candidates = newRequest();
       if (candidates.length !== 1) throw new Error("조회 화면의 신규 신청 버튼을 하나로 찾지 못했습니다.");
@@ -39,7 +40,7 @@
         await pause(50);
       }
     }
-    return feature.run(date, progress);
+    return feature.run(date, progress, inputs);
   }
   feature.runFromList = runFromList;
 
@@ -58,7 +59,7 @@
     running = true;
     send("started", { id: message.id });
     try {
-      await runFromList(message.date, text => send("progress", { id: message.id, text }));
+      await runFromList(message.date, text => send("progress", { id: message.id, text }), message.inputs);
       send("complete", { id: message.id });
     } catch (error) {
       send("error", { id: message.id, text: error.message });

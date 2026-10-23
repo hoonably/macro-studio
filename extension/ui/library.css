@@ -1,0 +1,12 @@
+.library-main{max-width:800px;margin:0 auto;padding:24px}
+.library-main h1{font-size:30px}.library-main section{margin-bottom:20px}
+.script-cards{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:10px}
+.script-card{display:flex;align-items:center;gap:18px;padding:16px;border:1px solid #dde5f0;border-radius:12px;background:#fff}
+.script-details{min-width:0;flex:1}.script-details strong{display:block;font-size:14px;overflow-wrap:anywhere}
+.script-sites{margin:5px 0 0;color:#738198;font-size:12px;overflow-wrap:anywhere}
+.script-card .actions{flex-shrink:0;flex-wrap:wrap;margin:0;gap:8px}.script-card button{width:auto;white-space:nowrap;font-size:12px;padding:8px 12px}
+.library-help p{font-size:13px;color:#6b7a90;line-height:1.7}
+#library-status{margin:0 0 20px;min-height:20px;color:#31704c}#library-status[data-error="true"]{color:#b42318}
+dialog{width:min(440px,calc(100vw - 32px));border:1px solid #dce3ed;border-radius:16px;padding:24px;color:#26354b;font:14px/1.6 system-ui,-apple-system,sans-serif;box-shadow:0 16px 60px #172b4d30}
+dialog::backdrop{background:#14294266}dialog h2{font-size:18px;margin:0 0 12px}#delete-name{font-weight:600;overflow-wrap:anywhere}#delete-description{font-size:13px;color:#65758c}
+@media(max-width:520px){.script-card{align-items:flex-start;flex-direction:column;gap:12px}.library-main{padding:16px}.library-main h1{font-size:25px}}

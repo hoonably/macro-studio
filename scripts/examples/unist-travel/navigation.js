@@ -70,7 +70,7 @@
     if (current.probe) clearInterval(current.probe);
     job = null;
     if (error) current.reject(new Error(error));
-    else current.resolve(current.date + " 결재선 준비 완료: " + feature.preset.approvers.join(" → ") + "\n최종 결재상신을 직접 누르세요.");
+    else current.resolve(current.date + " 결재선 준비 완료: " + current.inputs.preset.approvers.join(" → ") + "\n최종 결재상신을 직접 누르세요.");
   }
   window.addEventListener("message", event => {
     if (!job?.accepting || event.origin !== SAP || event.source !== sapFrame()?.contentWindow) return;
@@ -78,7 +78,7 @@
     if (!message || message.channel !== CHANNEL) return;
     if (message.type === "ready" && !job.started) {
       job.instance = message.instance;
-      send("run", { instance: message.instance, id: job.id, date: job.date });
+      send("run", { instance: message.instance, id: job.id, date: job.date, inputs: job.inputs });
       return;
     }
     if (message.id !== job.id || message.instance !== job.instance) return;
@@ -105,12 +105,14 @@
     }, 180000);
     send("probe");
   }
-  function start(date, report) {
+  function start(date, report, inputs = {}) {
     if (job) return Promise.reject(new Error("이미 출장신청을 준비하고 있습니다."));
+    const trip = feature.resolveTrip(date, inputs);
     return new Promise((resolve, reject) => {
-      job = { id: crypto.randomUUID(), date, report, resolve, reject, accepting: false };
+      job = { id: crypto.randomUUID(), date, inputs: { preset: trip.preset }, report, resolve, reject, accepting: false };
       navigate().catch(error => finish(error.message));
     });
   }
+  feature.runFromPortal = start;
   launcher.register(feature.launcherDefinition(start));
 })();

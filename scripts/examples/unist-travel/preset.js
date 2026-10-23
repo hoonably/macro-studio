@@ -11,10 +11,10 @@
     approvalLine: "", ...config,
     approvers: Object.freeze(Array.isArray(config.approvers) ? [...config.approvers] : [])
   });
-  feature.isConfigured = () => ["destination", "organization", "purpose", "approvalLine"]
-    .every(key => typeof feature.preset[key] === "string" && feature.preset[key].trim()) &&
-    feature.preset.approvers.length > 0 && feature.preset.approvers.every(name => typeof name === "string" && name.trim());
-  feature.ensureConfigured = () => {
-    if (!feature.isConfigured()) throw new Error("개인 출장 설정이 없습니다. local/profiles/unist-travel.json을 만들고 npm run build를 실행하세요. docs/unist.md 참고.");
+  feature.isConfigured = (preset = feature.preset) => ["destination", "organization", "purpose", "approvalLine"]
+    .every(key => typeof preset[key] === "string" && preset[key].trim()) &&
+    Array.isArray(preset.approvers) && preset.approvers.length > 0 && preset.approvers.every(name => typeof name === "string" && name.trim());
+  feature.ensureConfigured = (preset = feature.preset) => {
+    if (!feature.isConfigured(preset)) throw new Error("개인 출장 설정이 없습니다. local/profiles/unist-travel.json을 만들고 npm run build를 실행하세요. docs/unist.md 참고.");
   };
 })();

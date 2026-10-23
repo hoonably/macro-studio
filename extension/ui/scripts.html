@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>스크립트 자동 동기화 · Macro Studio</title><link rel="stylesheet" href="studio.css"></head>
+<body>
+  <header class="brand studio-brand"><img src="../assets/icon-48.png" width="36" height="36" alt=""><div><strong>Macro Studio</strong><p>파일을 저장하면 나만의 스크립트에 반영됩니다.</p></div><nav class="help-links"><a href="studio.html">작업 기록</a><a href="library.html">스크립트 보관함</a></nav></header>
+  <main>
+    <section>
+      <h2>스크립트 폴더 연결</h2>
+      <p>한 번 연결한 폴더에서 스크립트를 추가·수정하세요. 확장 프로그램을 다시 불러오지 않아도 목록이 바뀝니다.</p>
+      <p id="script-state" class="sync-status" role="status" aria-live="polite">설정을 확인하는 중…</p>
+      <div class="actions script-actions"><button id="connect-folder" disabled>스크립트 폴더 연결</button><button id="grant-folder" class="secondary" hidden>폴더 읽기 다시 허용</button><button id="sync-folder" class="secondary">다시 확인</button><button id="disconnect-folder" class="text-button" hidden>동기화 중지</button></div>
+      <div id="script-permission-setup" class="permission-setup" hidden><strong>폴더 연결 완료 · 실행 허용만 한 번 켜주세요</strong><p class="hint">Chrome 확장 세부정보에서 ‘사용자 스크립트 허용’을 켠 뒤 돌아오세요.</p><button id="script-settings" class="secondary">Chrome 실행 허용 설정 열기</button><button id="apply-script-settings" class="secondary">허용 설정 반영하고 계속</button></div>
+      <p class="hint">저장소 폴더 또는 local/scripts를 선택하세요. script.json에 지정한 파일만 읽으며 원본 파일은 수정하지 않습니다.</p>
+      <p id="sync-timing" class="hint">이 화면이나 작업실이 열려 있으면 약 2초마다, 닫혀 있어도 약 30초 간격으로 확인합니다. Chrome이 쉬는 동안에는 확인이 늦어질 수 있습니다.</p>
+      <p id="sync-detail" class="hint"></p>
+      <ul id="sync-errors" class="sync-errors"></ul>
+    </section>
+    <section id="script-origins-section" hidden>
+      <h2>새 스크립트가 사용할 사이트</h2><p class="hint">아직 허용하지 않은 사이트입니다. 사용할 주소만 선택하세요. 이미 허용한 주소는 다시 요청하지 않습니다.</p>
+      <ul id="script-origins" class="frame-sites"></ul><button id="grant-script-origins" disabled>선택한 사이트 허용</button>
+    </section>
+    <section>
+      <div class="section-heading"><h2>연결한 스크립트</h2><span id="synced-count" class="pill">0개</span></div>
+      <ul id="synced-scripts" class="synced-scripts"></ul><p id="synced-empty" class="empty">폴더 안의 각 스크립트에 script.json과 실행 파일을 넣으면 여기에 나타납니다.</p>
+      <p class="hint">파일을 저장해도 자동으로 작업을 실행하지 않습니다. 사이트에서 파란 버튼을 열어 직접 실행하세요. 실행 중인 작업이 끝난 뒤 변경사항을 반영합니다. 동기화를 중지해도 마지막으로 가져온 스크립트는 유지됩니다.</p>
+    </section>
+    <footer><button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button> · <a href="reset.html">처음 상태로 초기화</a></footer>
+  </main><script type="module" src="scripts.js"></script>
+</body></html>

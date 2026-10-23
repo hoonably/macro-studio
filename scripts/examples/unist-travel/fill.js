@@ -4,41 +4,47 @@
   const helper = window.MacroStudio;
   const feature = helper.features.travelRequest;
 
-  feature.fill = async function (date, onProgress = () => {}) {
-    feature.ensureConfigured();
-    const parts = date.split(".").map(Number);
-    const day = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-    if (!/^\d{4}\.\d{2}\.\d{2}$/.test(date) ||
-        day.getUTCFullYear() !== parts[0] || day.getUTCMonth() !== parts[1] - 1 ||
-        day.getUTCDate() !== parts[2]) throw new Error("날짜를 YYYY.MM.DD 형식의 실제 날짜로 입력하세요.");
+  function orderedTimes(session, preset) {
+    const fields = [
+      ["종료 시", "endho_cp", preset.endHour], ["종료 분", "endmi_cp", preset.endMinute],
+      ["시작 시", "begho_cp", preset.startHour], ["시작 분", "begmi_cp", preset.startMinute]
+    ];
+    const current = fields.map(([, name]) => session.read(name));
+    const readable = values => values.every((value, index) =>
+      typeof value === "string" && /^\d{2}$/.test(value) && Number(value) <= (index % 2 ? 59 : 23));
+    const valid = values => readable(values) &&
+      Number(values[0]) * 60 + Number(values[1]) > Number(values[2]) * 60 + Number(values[3]);
+    if (!readable(current)) throw new Error("현재 출장 시간을 확인하지 못했습니다. 신청서의 시작·종료 시간을 확인하세요.");
+    function plan(values, remaining) {
+      if (!remaining.length) return [];
+      for (const index of remaining) {
+        const next = [...values]; next[index] = fields[index][2];
+        if (!valid(next)) continue;
+        const rest = plan(next, remaining.filter(item => item !== index));
+        if (rest) return [fields[index], ...rest];
+      }
+      return null;
+    }
+    const result = plan(current, [0, 1, 2, 3]);
+    if (!result) throw new Error("시작·종료 시간을 안전한 순서로 변경할 수 없습니다. 시간을 직접 확인하세요.");
+    return result;
+  }
 
+  feature.fill = async function (date, onProgress = () => {}, inputs = {}) {
+    const { preset: p } = feature.resolveTrip(date, inputs);
     const session = helper.sap.connect("begda_cp");
     return session.runExclusive("출장신청", async () => {
-      const p = feature.preset;
-      const tasks = [
-        ["출장유형", "tco_left2_zztrvcl", p.tripType],
-        ["출장일", "begda_cp", date],
-        ["출장재원: 기타", "tco_zztrvfd_cp_cp", true],
-        ["외부지원", "zforyn", false],
-        ["타기관공동연구", "zjsyn", false],
-        ["자비", "allbt", true],
-        ["중복출장", "chk_duplication", false],
-        ["공용차량이용", "tco_gunyn_cp", false],
-        ["학회출장", "chk_society", false],
-        ["종료 시", "endho_cp", p.endHour],
-        ["종료 분", "endmi_cp", p.endMinute],
-        ["시작 시", "begho_cp", p.startHour],
-        ["시작 분", "begmi_cp", p.startMinute],
-        ["출장지", "zztrvlo_cp", p.destination],
-        ["출장기관", "zor_cp", p.organization],
-        ["출장목적", "zztrvpu", p.purpose],
-        ["관련문서번호", "textedit2", p.documentNumber],
-        ["비고", "textedit1", p.memo],
-        ["여비처리방법", "zztrvcm_cp", p.paymentMethod]
-      ];
+      const tasks = feature.tripTasks(date, p);
       let current = "초기화";
       try {
-        for (const [label, name, value] of tasks) {
+        let timePlanned = false;
+        for (let index = 0; index < tasks.length; index++) {
+          if (!timePlanned && tasks[index][1] === "endho_cp") {
+            // 기존 순서를 우선하되, 앞당긴 종료 시간이 현재 시작보다 빨라지지 않게 합니다.
+            tasks.splice(index, 4, ...orderedTimes(session, p));
+            timePlanned = true;
+          }
+          const [label, name, value] = tasks[index];
           current = label;
           onProgress(label);
           await session.set(name, value);
@@ -54,8 +60,11 @@
           ["출장비총액", "tco_tvamt_cp", p.expectedAmount]
         ]) {
           const actual = session.read(name);
-          rows.push({ 항목: label, 기대값: expected, 현재값: actual,
-            일치: Number(String(actual).replace(/,/g, "")) === expected });
+          const numeric = String(actual ?? "").replace(/,/g, "");
+          const valid = /^\d+(?:\.\d+)?$/.test(numeric) && Number.isFinite(Number(numeric));
+          rows.push({ 항목: label, 기대값: expected ?? "SAP 계산값 · 제출 전 확인", 현재값: actual,
+            일치: valid && (expected === null ? Number(numeric) >= 0 : name === "diff_cp" ?
+              Math.abs(Number(numeric) - expected) < 0.005001 : Number(numeric) === expected) });
         }
         // 입력값은 반환만 하고 콘솔에 남기지 않습니다.
         const failed = rows.filter(row => !row.일치);

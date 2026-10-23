@@ -5,17 +5,21 @@
   if (helper.launcher) return;
   const HOST_ID = "macro-studio-launcher";
   const POSITION_KEY = "macro-studio.launcher-position.v1";
+  const LIBRARY_EVENT = "macro-studio:library-state";
   const SIZE = 48, GAP = 12;
   const gridIcon = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" fill="currentColor"/><rect x="14" y="3" width="7" height="7" rx="2" fill="currentColor" opacity=".65"/><rect x="3" y="14" width="7" height="7" rx="2" fill="currentColor" opacity=".65"/><rect x="14" y="14" width="7" height="7" rx="2" fill="currentColor"/></svg>`;
   const scriptIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5M8 16h8"/></svg>`;
+  const archiveIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 8h16v12H4zM3 4h18v4H3zM9 12h6"/></svg>`;
 
   function create() {
     if (helper.launcher.app) return helper.launcher.app;
-    const definitions = new Map(), savedValues = new Map();
+    const definitions = new Map(), savedValues = new Map(), pendingDefinitions = new Map();
     let selected = null, busy = false, opened = false, position, drag = null, suppressClickUntil = 0;
+    let library = { ready: false, archived: [], deleted: [], pending: null };
     const host = document.createElement("div");
     host.id = HOST_ID;
-    host.style.cssText = "position:fixed;width:48px;height:48px;z-index:2147483647;";
+    host.hidden = true;
+    host.style.cssText = "display:none;position:fixed;width:48px;height:48px;z-index:2147483647;";
     const root = host.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
@@ -38,9 +42,13 @@
         .quiet{display:grid;place-items:center;border:0;background:transparent;color:#63748a;width:28px;height:28px;
           border-radius:8px;font-size:21px;padding:0}.quiet:hover{background:#f0f4fa}
         main{padding:16px}.eyebrow{margin:0 0 10px;font-size:11px;color:#718098;letter-spacing:.03em}
-        .script{display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:13px 12px;
+        .script-row{display:flex;gap:6px;align-items:center}.script-row+.script-row{margin-top:8px}
+        .script-archive{flex:none;width:32px;height:36px;font-size:14px}.script-archive svg{width:18px;height:18px}
+        .library-open{border:0;background:transparent;color:#61728a;padding:10px 0 0;font-size:12px}
+        .list-status{font-size:12px;color:#15803d;margin:10px 0 0}.list-status:empty{display:none}.list-status[data-error="true"]{color:#b42318}
+        .script{display:flex;gap:10px;align-items:center;width:100%;min-width:0;text-align:left;padding:13px 12px;
           border:1px solid #dce6f3;border-radius:12px;background:#f7faff;color:#1c2b40}
-        .script:hover{border-color:#8eb5ec;background:#eff6ff}.script+.script{margin-top:8px}
+        .script:hover{border-color:#8eb5ec;background:#eff6ff}
         .script-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:#e8f0ff;color:#145fc0}
         .script-icon svg{width:21px;height:21px}.script-copy{flex:1;min-width:0}
         .script-copy strong{display:block;font-size:13px}.script-copy small{display:block;color:#718098;font-size:11px;margin-top:3px}
@@ -66,7 +74,7 @@
         <header><button class="quiet back" type="button" aria-label="스크립트 목록으로" hidden>‹</button>
           <div class="brand"><strong>Macro Studio</strong><span>자주 하는 일을 간편하게</span></div>
           <button class="quiet close" type="button" aria-label="도우미 닫기">×</button></header>
-        <main><div class="list"><p class="eyebrow">스크립트</p><div class="scripts"></div><p class="empty">등록된 스크립트가 없습니다.</p><button class="studio-open" data-studio-action="open" type="button">＋ 새 자동화 만들기</button></div>
+        <main><div class="list"><p class="eyebrow">스크립트</p><div class="scripts"></div><p class="empty">스크립트를 불러오는 중…</p><p class="list-status" role="status"></p><button class="studio-open" data-studio-action="open" type="button">＋ 새 자동화 만들기</button><button class="library-open" data-studio-action="library" type="button">스크립트 보관함 ↗</button></div>
           <div class="config" hidden><h2></h2><p class="description"></p>
             <form><div class="fields"></div><details><summary>입력 내용 확인</summary><dl></dl></details>
               <p class="note"></p><button class="run" type="submit">신청 준비</button></form>
@@ -129,6 +137,7 @@
       if (returnFocus) orb.focus({ preventScroll: true });
     }
     function open() {
+      if (host.hidden) return;
       opened = true;
       panel.hidden = false;
       orb.setAttribute("aria-expanded", "true");
@@ -146,9 +155,11 @@
       config.hidden = back.hidden = true;
     }
     function choose(definition) {
-      if (busy) return;
+      if (busy || !library.ready || library.siteEnabled === false || library.pending || unavailable(definition.id)) return;
       rememberValues();
       selected = definition;
+      form.dataset.localScript = definition.local?.id || '';
+      form.dataset.localRevision = definition.local?.revision || '';
       list.hidden = true;
       config.hidden = back.hidden = false;
       config.querySelector("h2").textContent = definition.name;
@@ -185,6 +196,64 @@
       config.querySelector("details").open = false;
       alignPanel();
     }
+    function unavailable(id) {
+      return library.archived.includes(id) || library.deleted.includes(id) || (library.available && !library.available.includes(id));
+    }
+    function updateVisibility() {
+      const hasScripts = [...definitions.keys()].some(id => !library.deleted.includes(id) && (!library.available || library.available.includes(id)));
+      const visible = busy || (library.ready && library.siteEnabled !== false &&
+        (library.siteEnabled === true || hasScripts || library.archived.length > 0));
+      if (!visible && opened) close(false);
+      host.hidden = !visible;
+      // Inline display also hides the host when its shadow :host styles reset browser defaults.
+      host.style.display = visible ? 'block' : 'none';
+    }
+    function renderScripts() {
+      const scripts = root.querySelector('.scripts');
+      scripts.replaceChildren();
+      if (library.ready) for (const definition of definitions.values()) {
+        if (unavailable(definition.id)) continue;
+        const row = document.createElement('div'); row.className = 'script-row';
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'script'; button.dataset.scriptId = definition.id;
+        button.disabled = busy || library.siteEnabled === false || !!library.pending;
+        button.innerHTML = `<span class="script-icon">${scriptIcon}</span><span class="script-copy"><strong></strong><small></small></span><span class="chevron" aria-hidden="true">›</span>`;
+        button.querySelector('strong').textContent = definition.name;
+        button.querySelector('small').textContent = definition.description || '';
+        button.addEventListener('click', () => choose(definition));
+        const archive = document.createElement('button');
+        archive.type = 'button'; archive.className = 'quiet script-archive'; archive.innerHTML = archiveIcon;
+        archive.title = '보관함으로 이동'; archive.setAttribute('aria-label', definition.name + ' 보관함으로 이동');
+        archive.dataset.studioAction = 'archive-script'; archive.dataset.scriptId = definition.id;
+        archive.disabled = busy || library.siteEnabled === false || !!library.pending;
+        row.append(button, archive); scripts.append(row);
+      }
+      const empty = root.querySelector('.empty');
+      empty.hidden = !!scripts.children.length;
+      empty.textContent = library.ready ? '아직 실행할 스크립트가 없습니다. 새 자동화를 만들어 보세요.' :
+        library.error ? '스크립트를 불러오지 못했습니다. 확장과 페이지를 새로고침하세요.' : '스크립트를 불러오는 중…';
+      runButton.disabled = busy || !library.ready || library.siteEnabled === false || !!library.pending || !!(selected && unavailable(selected.id));
+      root.querySelector('.studio-open').disabled = busy || !library.ready || library.siteEnabled === false;
+      updateVisibility();
+    }
+    function applyLibraryState(state) {
+      if (!state || !Array.isArray(state.archived) || !Array.isArray(state.deleted)) return;
+      library = { ready: state.ready === true, archived: state.archived.filter(id => typeof id === 'string'),
+        deleted: state.deleted.filter(id => typeof id === 'string'), available: Array.isArray(state.available) ? state.available.filter(id => typeof id === 'string') : null,
+        siteEnabled: typeof state.siteEnabled === 'boolean' ? state.siteEnabled : null,
+        pending: state.pending || null, error: state.error || '' };
+      if (selected && unavailable(selected.id) && !busy) showList();
+      else if (selected && !busy && library.ready && definitions.get(selected.id) !== selected) choose(definitions.get(selected.id));
+      for (const id of library.deleted) savedValues.delete(id);
+      renderScripts();
+      const message = root.querySelector('.list-status'); message.textContent = state.error || state.message || '';
+      message.dataset.error = String(!!state.error);
+      if (state.message) announcement.textContent = state.message;
+    }
+    // This DOM channel only updates presentation; privileged writes require a trusted isolated-world click.
+    host.addEventListener(LIBRARY_EVENT, event => {
+      try { if (typeof event.detail === 'string') applyLibraryState(JSON.parse(event.detail)); } catch {}
+    });
     function report(text, state = "running") {
       output.textContent = text;
       output.dataset.state = state;
@@ -232,10 +301,11 @@
     window.addEventListener("resize", () => { move(position.x, position.y); });
     form.addEventListener("submit", async event => {
       event.preventDefault();
-      if (busy || !selected || !form.reportValidity()) return;
+      if (busy || !library.ready || library.siteEnabled === false || library.pending || !selected || unavailable(selected.id) || !form.reportValidity()) return;
       const definition = selected;
       rememberValues();
       busy = true;
+      renderScripts();
       back.disabled = runButton.disabled = true;
       for (const input of controls.values()) input.disabled = true;
       runButton.textContent = "진행 중…";
@@ -252,6 +322,10 @@
         back.disabled = runButton.disabled = false;
         for (const input of controls.values()) input.disabled = false;
         runButton.textContent = definition.actionLabel || "실행";
+        if (selected && unavailable(selected.id)) showList();
+        for (const definition of pendingDefinitions.values()) app.replace(definition);
+        pendingDefinitions.clear();
+        renderScripts();
       }
     });
 
@@ -260,18 +334,17 @@
       register(definition) {
         if (!definition?.id || typeof definition.run !== "function") throw new Error("스크립트 정의를 확인하세요.");
         if (definitions.has(definition.id)) return;
-        root.querySelector(".empty").hidden = true;
         definitions.set(definition.id, definition);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "script";
-        button.dataset.scriptId = definition.id;
-        button.innerHTML = `<span class="script-icon">${scriptIcon}</span><span class="script-copy"><strong></strong><small></small></span><span class="chevron" aria-hidden="true">›</span>`;
-        button.querySelector("strong").textContent = definition.name;
-        button.querySelector("small").textContent = definition.description || "";
-        button.addEventListener("click", () => choose(definition));
-        root.querySelector(".scripts").append(button);
-      }
+        renderScripts();
+      },
+      replace(definition) {
+        if (!definition?.id || typeof definition.run !== 'function') throw new Error('스크립트 정의를 확인하세요.');
+        if (busy) { pendingDefinitions.set(definition.id, definition); return; }
+        definitions.set(definition.id, definition);
+        if (selected?.id === definition.id) choose(definition);
+        renderScripts();
+      },
+      applyLibraryState
     };
     helper.launcher.app = app;
     return app;

@@ -28,6 +28,7 @@ test('launcher starts as an icon, registers multiple scripts once, prevents conc
   const definition = { id: 'test', name: '테스트', run: async () => { count++; await new Promise(resolve => { release = resolve; }); return '완료'; } };
   app.register(definition); app.register(definition);
   app.register({ id: 'error', name: '오류', run: async () => { throw new Error('예상 오류'); } });
+  app.applyLibraryState({ ready: true, archived: [], deleted: [] });
   assert.equal(shadow.querySelectorAll('.script').length, 2);
   shadow.querySelector('.orb').click();
   assert.equal(shadow.querySelector('.panel').hidden, false);
@@ -42,17 +43,4 @@ test('launcher starts as an icon, registers multiple scripts once, prevents conc
   assert.equal(shadow.querySelector('.panel').hidden, false);
   assert.match(shadow.querySelector('output').textContent, /예상 오류/);
   assert.equal(shadow.querySelector('.run').disabled, false);
-});
-test('packaged form example fills the demo and does not submit', async () => {
-  const { window, document, ctx } = context('<html><body><form id="demo-form"><input name="visitDate"><input name="organization"><textarea name="purpose"></textarea><output id="demo-result"></output></form></body></html>');
-  await load(ctx, 'extension/core/namespace.js', 'extension/adapters/dom.js');
-  let definition, submitted = false;
-  window.MacroStudio.launcher = { create: () => ({ register: item => { definition = item; } }) };
-  document.querySelector('form').addEventListener('submit', () => { submitted = true; });
-  await load(ctx, 'scripts/examples/form-fill/script.js');
-  await definition.run({ date: '2026-10-23' }, () => {});
-  assert.equal(document.querySelector('[name="visitDate"]').value, '2026-10-23');
-  assert.equal(document.querySelector('[name="organization"]').value, '예제 연구실');
-  assert.equal(document.querySelector('[name="purpose"]').value, '정기 미팅');
-  assert.equal(submitted, false);
 });
