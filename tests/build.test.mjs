@@ -11,17 +11,24 @@ test('a fresh personal build prepares an empty connectable script folder; public
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'macro-studio-first-run-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   for (const dir of ['extension', 'profiles', 'scripts']) await fs.cp(path.join(projectRoot, dir), path.join(root, dir), { recursive: true });
+  await fs.mkdir(path.join(root, 'extension/.gallery'), { recursive: true });
+  await fs.writeFile(path.join(root, 'extension/.gallery/gallery.csv'), 'PRIVATE_LOCAL_METADATA');
   await build({ root, publicOnly: true });
   await assert.rejects(fs.access(path.join(root, 'local')));
+  await assert.rejects(fs.access(path.join(root, 'dist-public/.gallery')));
   const result = await build({ root });
   assert.equal(result.personal, false);
   assert.equal(result.scripts, 0);
+  await assert.rejects(fs.access(path.join(root, 'dist/.gallery')));
   assert.deepEqual(await fs.readdir(path.join(root, 'local/scripts')), []);
   const directory = file => ({ kind: 'directory', name: path.basename(file),
     getDirectoryHandle: async name => { await fs.access(path.join(file, name)); return directory(path.join(file, name)); },
     async *values() { for (const name of await fs.readdir(file)) yield directory(path.join(file, name)); }
   });
   assert.deepEqual(await readScripts(await scriptsDirectory(directory(root))), { scripts: [], errors: [] });
+  await fs.mkdir(path.join(root, 'local/scripts/.gallery'));
+  await fs.writeFile(path.join(root, 'local/scripts/.gallery/gallery.csv'), 'PRIVATE_LOCAL_METADATA');
+  assert.equal((await build({ root })).scripts, 0, 'Local gallery indexes are not script folders');
 });
 
 test('public build excludes private configuration and scripts; personal build registers scoped scripts', async t => {

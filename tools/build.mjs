@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const readJSON = async file => JSON.parse(await fs.readFile(file, 'utf8'));
 const exists = async file => !!(await fs.stat(file).catch(() => null));
+const sourceOnly = source => !['.gallery', '.DS_Store'].includes(path.basename(source));
 const validId = id => typeof id === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(id);
 export function validateMatch(pattern) {
   if (typeof pattern !== 'string' || !/^https?:\/\/(?:\*\.)?[a-z0-9.-]+(?::\d+)?\/[^\s]*$/i.test(pattern)) {
@@ -21,7 +22,7 @@ async function folders(directory) {
   return (await fs.readdir(directory, { withFileTypes: true }).catch(error => {
     if (error.code === 'ENOENT') return [];
     throw error;
-  })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
+  })).filter(entry => entry.isDirectory() && sourceOnly(entry.name)).map(entry => entry.name).sort();
 }
 
 export async function build({ root = projectRoot, publicOnly = false } = {}) {
@@ -83,9 +84,9 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
   const staging = output + '.building';
   await fs.rm(staging, { force: true, recursive: true });
   try {
-    await fs.cp(path.join(root, 'extension'), staging, { recursive: true });
+    await fs.cp(path.join(root, 'extension'), staging, { recursive: true, filter: sourceOnly });
     await fs.rm(path.join(staging, 'manifest.base.json'));
-    await fs.cp(path.join(root, 'scripts/examples'), path.join(staging, 'scripts/examples'), { recursive: true });
+    await fs.cp(path.join(root, 'scripts/examples'), path.join(staging, 'scripts/examples'), { recursive: true, filter: sourceOnly });
     for (const file of localScripts) {
       const target = path.join(staging, file.target);
       await fs.mkdir(path.dirname(target), { recursive: true });
