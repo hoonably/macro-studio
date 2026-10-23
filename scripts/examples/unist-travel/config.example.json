@@ -1,0 +1,15 @@
+{
+  "name": "나의 출장신청",
+  "tripType": "관내출장",
+  "startHour": "13", "startMinute": "00", "endHour": "17", "endMinute": "00",
+  "destination": "방문 지역",
+  "organization": "방문 기관",
+  "purpose": "실제 출장 목적",
+  "documentNumber": "",
+  "memo": "실제 비고",
+  "paymentMethod": "사후지급",
+  "expectedHours": 4,
+  "expectedAmount": 20000,
+  "approvalLine": "포탈에 저장한 결재선의 정확한 표시 이름",
+  "approvers": ["첫 번째 결재자", "두 번째 결재자"]
+}

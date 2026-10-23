@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-public/
+dist.building/
+dist-public.building/
+artifacts/
+local/*
+!local/README.md
+.env
+.env.*
+!.env.example
+.DS_Store
+*.mhtml
+*.har
+*.log
+coverage/

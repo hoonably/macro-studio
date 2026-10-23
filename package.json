@@ -1,0 +1,18 @@
+{
+  "name": "macro-studio",
+  "version": "1.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Record a workflow. Build your own browser macro with a coding agent.",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "build:public": "node tools/build.mjs --public",
+    "new:script": "node tools/new-script.mjs",
+    "check": "node tools/check.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "verify": "npm run check && npm test && npm run build:public && npm run build"
+  },
+  "devDependencies": { "linkedom": "0.18.12" }
+}

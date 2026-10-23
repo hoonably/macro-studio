@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { context, load, tick } from './helpers.mjs';
+
+test('DOM adapter uses real input events, rejects ambiguous and sensitive targets and keeps final submit manual', async () => {
+  const { window, document, ctx } = context('<html><body><input name="date"><input type="password" name="password"><input class="duplicate"><input class="duplicate"><button type="submit">최종 제출</button><button id="open" type="button">열기</button></body></html>');
+  await load(ctx, 'extension/core/namespace.js', 'extension/adapters/dom.js');
+  const dom = window.MacroStudio.dom;
+  const events = []; document.querySelector('[name="date"]').addEventListener('input', () => events.push('input'));
+  await dom.set('[name="date"]', '2026-10-23');
+  await dom.set('[name="date"]', '2026-10-23');
+  assert.deepEqual(events, ['input']);
+  assert.throws(() => dom.one('.duplicate'), /하나로/);
+  await assert.rejects(dom.set('[name="password"]', 'private'), /직접 입력/);
+  await assert.rejects(dom.click('[type="submit"]'), /최종 제출/);
+  await assert.rejects(dom.click('#open', { expectedText: '다른 버튼' }), /예상과/);
+  let clicked = false; document.querySelector('#open').addEventListener('click', () => { clicked = true; });
+  await dom.click('#open', { expectedText: '열기' }); assert.ok(clicked);
+});
+test('launcher starts as an icon, registers multiple scripts once, prevents concurrent runs and recovers from failures', async () => {
+  const { window, document, ctx } = context();
+  await load(ctx, 'extension/ui/launcher.js');
+  const app = window.MacroStudio.launcher.create();
+  assert.equal(app, window.MacroStudio.launcher.create());
+  const host = document.getElementById('macro-studio-launcher'), shadow = host.shadowRoot;
+  assert.ok(shadow.querySelector('.panel').hidden);
+  let count = 0, release;
+  const definition = { id: 'test', name: '테스트', run: async () => { count++; await new Promise(resolve => { release = resolve; }); return '완료'; } };
+  app.register(definition); app.register(definition);
+  app.register({ id: 'error', name: '오류', run: async () => { throw new Error('예상 오류'); } });
+  assert.equal(shadow.querySelectorAll('.script').length, 2);
+  shadow.querySelector('.orb').click();
+  assert.equal(shadow.querySelector('.panel').hidden, false);
+  shadow.querySelector('[data-script-id="test"]').click();
+  const form = shadow.querySelector('form'); form.reportValidity = () => true;
+  form.dispatchEvent(new window.Event('submit', { cancelable: true }));
+  form.dispatchEvent(new window.Event('submit', { cancelable: true }));
+  assert.equal(count, 1); release(); await tick();
+  assert.ok(shadow.querySelector('.panel').hidden);
+  shadow.querySelector('.orb').click(); shadow.querySelector('[data-script-id="error"]').click();
+  form.dispatchEvent(new window.Event('submit', { cancelable: true })); await tick();
+  assert.equal(shadow.querySelector('.panel').hidden, false);
+  assert.match(shadow.querySelector('output').textContent, /예상 오류/);
+  assert.equal(shadow.querySelector('.run').disabled, false);
+});
+test('packaged form example fills the demo and does not submit', async () => {
+  const { window, document, ctx } = context('<html><body><form id="demo-form"><input name="visitDate"><input name="organization"><textarea name="purpose"></textarea><output id="demo-result"></output></form></body></html>');
+  await load(ctx, 'extension/core/namespace.js', 'extension/adapters/dom.js');
+  let definition, submitted = false;
+  window.MacroStudio.launcher = { create: () => ({ register: item => { definition = item; } }) };
+  document.querySelector('form').addEventListener('submit', () => { submitted = true; });
+  await load(ctx, 'scripts/examples/form-fill/script.js');
+  await definition.run({ date: '2026-10-23' }, () => {});
+  assert.equal(document.querySelector('[name="visitDate"]').value, '2026-10-23');
+  assert.equal(document.querySelector('[name="organization"]').value, '예제 연구실');
+  assert.equal(document.querySelector('[name="purpose"]').value, '정기 미팅');
+  assert.equal(submitted, false);
+});

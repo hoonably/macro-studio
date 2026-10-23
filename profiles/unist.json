@@ -1,0 +1,45 @@
+{
+  "id": "unist",
+  "name": "UNIST Portal",
+  "origins": [
+    "https://portal.unist.ac.kr/*",
+    "https://s4hana.unist.ac.kr/*"
+  ],
+  "entries": [
+    {
+      "matches": [
+        "https://portal.unist.ac.kr/irj/portal*"
+      ],
+      "files": [
+        "core/namespace.js",
+        "core/config.js",
+        "ui/launcher.js",
+        "scripts/examples/unist-travel/preset.js",
+        "scripts/examples/unist-travel/config.js",
+        "scripts/examples/unist-travel/navigation.js"
+      ],
+      "world": "MAIN",
+      "allFrames": false
+    },
+    {
+      "matches": [
+        "https://s4hana.unist.ac.kr/sap/bc/webdynpro/sap/ZHRW3213*",
+        "https://s4hana.unist.ac.kr/sap/bc/webdynpro/sap/ZHRW3218*"
+      ],
+      "files": [
+        "core/namespace.js",
+        "core/config.js",
+        "adapters/sap.js",
+        "ui/launcher.js",
+        "scripts/examples/unist-travel/preset.js",
+        "scripts/examples/unist-travel/config.js",
+        "scripts/examples/unist-travel/fill.js",
+        "scripts/examples/unist-travel/approval.js",
+        "scripts/examples/unist-travel/bridge.js",
+        "scripts/examples/unist-travel/panel.js"
+      ],
+      "world": "MAIN",
+      "allFrames": true
+    }
+  ]
+}
