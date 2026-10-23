@@ -306,6 +306,7 @@ test('reset preview is read-only and only an explicit own reset-page confirmatio
   const resetPage = { ...env.ui, url: 'chrome-extension://studio/ui/reset.html' };
   assert.equal((await env.send({ type: 'reset:state' }, env.content)).ok, false);
   assert.equal((await env.send({ type: 'reset:state' }, resetPage)).value.steps, 1);
+  assert.equal((await env.send({ type: 'reset:state' }, resetPage)).value.scripts, 2, 'Includes bundled and archived scripts, not just imported snapshots');
   assert.equal(env.state.macroStudioRecording.status, 'recording');
   for (const sender of [env.content, env.ui, { ...resetPage, id: 'forged' }]) {
     assert.equal((await env.send({ type: 'reset:confirm', confirmed: true }, sender)).ok, false);
@@ -314,7 +315,10 @@ test('reset preview is read-only and only an explicit own reset-page confirmatio
   assert.equal((await env.send({ type: 'reset:confirm', confirmed: true }, resetPage)).ok, true);
   assert.equal(env.state.macroStudioRecording, undefined);
   assert.deepEqual(env.memory, {});
-  assert.equal(env.local[SITES_KEY], undefined); assert.equal(env.local[LIBRARY_KEY], undefined);
+  assert.equal(env.local[SITES_KEY], undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(env.local[LIBRARY_KEY])), { archived: [], deleted: ['weekly-task', 'other-task'] });
+  assert.equal((await env.send({ type: 'reset:state' }, resetPage)).value.scripts, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify((await env.send({ type: 'scripts:state' })).value.catalog)), []);
   assert.equal(env.local.macroStudioLocalScripts, undefined); assert.equal(env.local.unrelated, 'keep');
   assert.deepEqual(JSON.parse(JSON.stringify(env.calls.find(call => call[0] === 'remove-permissions')[1])), { origins: ['https://extra.test/*'], permissions: ['webNavigation'] });
   assert.equal((await env.send({ type: 'local:sync' })).value.count, 0);
@@ -351,9 +355,12 @@ test('bundled UNIST sites stay OFF on a fresh install and after reset despite re
     assert.equal(reset.ok, true, reset.error);
     await env.send({ type: 'local:sync' });
     await assertOff();
+    assert.equal((await env.send({ type: 'scripts:state' })).value.catalog.length, 0, 'Reset empties the full library even in an old bundled build');
     env = await worker(options); sender = prepare();
     await assertOff();
     assert.equal((await env.send({ type: 'site:set', tabId: 42, origin, enabled: true })).value.enabled, true);
+    assert.equal((await env.send({ type: 'scripts:state' })).value.catalog.length, 0, 'Enabling the site after restart must not restore the deleted example');
+    assert.ok((await env.send({ type: 'scripts:state' }, sender)).value.deleted.includes('unist-travel'));
   }
 });
 

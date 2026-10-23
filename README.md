@@ -30,7 +30,7 @@ flowchart LR
 - 검토한 기록을 JSON 또는 에이전트용 프롬프트로 내보내기
 - 개인 스크립트 생성 명령과 자동 빌드·등록
 - 스크립트 폴더 연결, 저장 후 자동 갱신과 열린 페이지의 실행 버튼 반영
-- 첫 사이트 프로필: **UNIST 포탈 → 일반행정 → 인사 → 국내출장 신청 → 신청 → 입력 → 저장 결재선 준비**
+- UNIST 출장 흐름을 참고할 수 있는 개발용 예제 소스
 
 **현재 AI 연결 방식은 프롬프트 전달입니다.** 확장 안의 Codex·Claude 채팅, 로컬 companion 설치, 자동 코드 적용은 아직 구현하지 않았습니다. [확장 계획](docs/roadmap.md)을 참고하세요.
 
@@ -50,6 +50,8 @@ npm run build
 3. 이 저장소의 **`dist` 폴더**를 선택합니다. 로드한 폴더는 계속 유지하세요.
 4. 도구모음의 **Macro Studio** 아이콘을 누르면 작은 팝업이 열립니다. **이 사이트에 적용**을 ON으로 켜세요.
 5. 페이지에 나타난 파란 버튼 → **새 자동화 만들기**를 누르면 오른쪽에 작업실이 열립니다.
+
+처음 설치하면 스크립트 목록은 비어 있고 모든 사이트는 OFF입니다. UNIST 출장 예제도 자동 설치되지 않습니다. 필요한 작업을 기록해 개인 스크립트를 만들어 추가하세요.
 
 개인 스크립트를 만들 때는 팝업의 **스크립트 연결·관리** 또는 작업실의 **스크립트 연결**을 엽니다. 저장소 폴더 또는 `local/scripts`를 한 번 선택하고, 안내가 나오면 Chrome의 **사용자 스크립트 허용**을 켜세요. 이후 그 폴더에 코드를 저장하면 확장 관리 화면을 열지 않아도 목록과 실행 버튼이 갱신됩니다. 새 사이트는 선택해 한 번 허용합니다. Chrome 135–137에서는 개발자 모드가 사용자 스크립트를 허용합니다.
 
@@ -79,14 +81,7 @@ npm run new:script -- weekly-task --name "매주 하는 작업" --url https://ex
 
 ## UNIST 출장 예제
 
-공개 예제에는 출장 목적·기관·결재자 같은 개인값이 없습니다. 실제 사용 전에 설정 파일을 만드세요.
-
-```bash
-mkdir -p local/profiles
-cp scripts/examples/unist-travel/config.example.json local/profiles/unist-travel.json
-# 개인 설정을 수정한 다음
-npm run build
-```
+`scripts/examples/unist-travel/`과 `profiles/unist.json`은 개발용 참고 소스입니다. 기본 빌드에 포함하거나 실행 목록에 등록하지 않습니다. 필요한 경우 에이전트에게 이 소스와 [UNIST 동작 범위](docs/unist.md)를 참고해 `local/scripts/<id>/`에 개인 스크립트를 만들도록 요청하세요. 개인값과 필요한 파일의 로드 순서도 해당 스크립트에서 명시해야 합니다.
 
 이 예제는 **관내출장·기타/자비** 조합을 기준으로 합니다. 다른 출장 유형이나 재원은 실제 폼을 확인해 코드를 확장해야 합니다.
 저장된 결재선을 선택하고 순서가 맞는지 확인한 뒤 멈춥니다. **최종 결재상신은 사용자가 직접 누릅니다.** [UNIST 설정·동작 범위](docs/unist.md)
@@ -96,8 +91,8 @@ npm run build
 ```text
 extension/                 공통 실행 기능, 아이콘, 사이드패널, 기록기
   adapters/                일반 DOM / SAP
-profiles/                  사이트별 로드 범위와 진입점
-scripts/examples/          공개 예제
+profiles/                  사이트별 로드 범위와 진입점 참고 자료
+scripts/examples/          개발용 예제 소스 (기본 설치 제외)
 templates/script/          개인 스크립트 템플릿
 tools/                     빌드, 생성, 읽기 전용 진단
 local/                     개인 설정·스크립트·진단 자료 (Git 제외)
@@ -113,7 +108,7 @@ CLAUDE.md                  공통 규칙 참조
 
 ```bash
 npm run verify          # 문법·개인값 분리 검사, 테스트, 두 종류 빌드
-npm run build           # 개인 설정과 개인 스크립트 포함
+npm run build           # local/scripts의 개인 스크립트 포함; 없으면 빈 목록
 npm run build:public    # local/을 읽지 않는 공유용 빌드
 ```
 

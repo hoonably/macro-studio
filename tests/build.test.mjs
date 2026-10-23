@@ -13,10 +13,16 @@ test('a fresh personal build prepares an empty connectable script folder; public
   for (const dir of ['extension', 'profiles', 'scripts']) await fs.cp(path.join(projectRoot, dir), path.join(root, dir), { recursive: true });
   await fs.mkdir(path.join(root, 'extension/.gallery'), { recursive: true });
   await fs.writeFile(path.join(root, 'extension/.gallery/gallery.csv'), 'PRIVATE_LOCAL_METADATA');
-  await build({ root, publicOnly: true });
+  const shared = await build({ root, publicOnly: true });
   await assert.rejects(fs.access(path.join(root, 'local')));
   await assert.rejects(fs.access(path.join(root, 'dist-public/.gallery')));
   const result = await build({ root });
+  for (const built of [shared, result]) {
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(built.output, 'core/script-catalog.json'), 'utf8')), []);
+    assert.deepEqual(built.manifest.host_permissions, []);
+    assert.equal(built.manifest.content_scripts, undefined, 'No scripts or empty match registrations on a fresh install');
+    await assert.rejects(fs.access(path.join(built.output, 'scripts/examples')));
+  }
   assert.equal(result.personal, false);
   assert.equal(result.scripts, 0);
   await assert.rejects(fs.access(path.join(root, 'dist/.gallery')));
@@ -31,7 +37,7 @@ test('a fresh personal build prepares an empty connectable script folder; public
   assert.equal((await build({ root })).scripts, 0, 'Local gallery indexes are not script folders');
 });
 
-test('public build excludes private configuration and scripts; personal build registers scoped scripts', async t => {
+test('builds ignore legacy presets and examples; only explicit personal scripts are bundled', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'macro-studio-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   for (const dir of ['extension', 'profiles', 'scripts', 'templates']) await fs.cp(path.join(projectRoot, dir), path.join(root, dir), { recursive: true });
@@ -44,10 +50,10 @@ test('public build excludes private configuration and scripts; personal build re
   await assert.rejects(newScript({ root, id: 'bad-site', url: 'file:///private' }), /http/);
   const personal = await build({ root });
   assert.equal(personal.personal, true);
-  assert.ok((await fs.readFile(path.join(personal.output, 'core/config.js'), 'utf8')).includes('PRIVATE_SENTINEL'));
+  assert.ok(!(await fs.readFile(path.join(personal.output, 'core/config.js'), 'utf8')).includes('PRIVATE_SENTINEL'));
   assert.ok(personal.manifest.content_scripts.some(entry => entry.js.includes('scripts/local/weekly-task/script.js')));
   const catalog = JSON.parse(await fs.readFile(path.join(personal.output, 'core/script-catalog.json'), 'utf8'));
-  assert.equal(catalog.find(script => script.id === 'unist-travel').name, 'PRIVATE_NAME_SENTINEL');
+  assert.deepEqual(catalog.map(script => script.id), ['weekly-task']);
   assert.deepEqual(catalog.find(script => script.id === 'weekly-task').matches, ['https://example.test/*']);
   await fs.access(path.join(personal.output, 'ui/library.html'));
   assert.equal(personal.manifest.action.default_popup, 'ui/popup.html');
@@ -55,20 +61,27 @@ test('public build excludes private configuration and scripts; personal build re
   const shared = await build({ root, publicOnly: true });
   assert.equal(shared.personal, false);
   assert.ok(!(await fs.readFile(path.join(shared.output, 'core/config.js'), 'utf8')).includes('PRIVATE_SENTINEL'));
-  assert.ok(!shared.manifest.content_scripts.some(entry => entry.js.some(file => file.includes('/local/'))));
+  assert.equal(shared.manifest.content_scripts, undefined);
   await assert.rejects(fs.access(path.join(shared.output, 'scripts/local')));
   const publicCatalog = JSON.parse(await fs.readFile(path.join(shared.output, 'core/script-catalog.json'), 'utf8'));
-  assert.ok(!publicCatalog.some(script => script.id === 'weekly-task'));
+  assert.deepEqual(publicCatalog, []);
   assert.ok(!JSON.stringify(publicCatalog).includes('PRIVATE_NAME_SENTINEL'));
-  // A public build must not even parse a private file.
+  // Legacy preset files no longer install any script, in either build.
   await fs.writeFile(path.join(root, 'local/profiles/unist-travel.json'), 'not JSON');
   await build({ root, publicOnly: true });
-  await fs.writeFile(path.join(root, 'local/profiles/unist-travel.json'), '{}');
+  await build({ root });
   const metadata = path.join(script, 'script.json');
   const malicious = JSON.parse(await fs.readFile(metadata, 'utf8')); malicious.entries[0].files = ['../../../outside.js'];
   await fs.writeFile(metadata, JSON.stringify(malicious));
   await assert.rejects(build({ root }), /ファイル|파일/);
-  await newScript({ root, id: 'unist-travel', name: 'Duplicate', url: 'https://example.test' });
-  await assert.rejects(build({ root }), /중복된 스크립트 id/);
+  malicious.entries[0].files = ['script.js'];
+  await fs.writeFile(metadata, JSON.stringify(malicious));
+  await newScript({ root, id: 'unist-travel', name: 'User-created task', url: 'https://example.test' });
+  const explicit = await build({ root });
+  assert.equal(explicit.scripts, 2, 'An example name does not reserve or auto-install an id');
+  await fs.rm(path.join(root, 'local/scripts'), { recursive: true });
+  const cleaned = await build({ root });
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(cleaned.output, 'core/script-catalog.json'), 'utf8')), []);
+  await assert.rejects(fs.access(path.join(cleaned.output, 'scripts/local')));
   assert.throws(() => validateMatch('<all_urls>'), /사이트 범위/);
 });

@@ -202,9 +202,10 @@ async function handle(message, sender) {
   if (!controlPage(sender)) throw new Error('확장 프로그램 화면에서 실행하세요.');
   switch (message.type) {
     case 'reset:state': {
-      const [recording, scripts, sites] = await Promise.all([read(), localScripts.status(), readSites()]);
-      return { steps: recording?.steps?.length || 0, recording: recording?.status === 'recording', scripts: scripts.count,
-        connected: scripts.connected, sites: Object.keys(sites).length, running: scripts.running };
+      const [recording, status, sites, library] = await Promise.all([read(), localScripts.status(), readSites(),
+        scripts({ type: 'scripts:state' }, sender)]);
+      return { steps: recording?.steps?.length || 0, recording: recording?.status === 'recording', scripts: library.catalog.length,
+        connected: status.connected, sites: Object.keys(sites).length, running: status.running };
     }
     case 'reset:confirm': {
       if (new URL(sender.url).pathname !== '/ui/reset.html' || message.confirmed !== true) throw new Error('초기화 화면에서 삭제 범위를 확인하세요.');
@@ -216,6 +217,9 @@ async function handle(message, sender) {
         }
         await chrome.storage.session.remove(KEY);
         await chrome.storage.local.remove([LIBRARY_KEY, SITES_KEY, 'macroStudioResumeScriptsTab']);
+        // Clearing imported data must not revive scripts still bundled in an older build.
+        const deleted = (await catalog()).map(script => script.id);
+        if (deleted.length) await chrome.storage.local.set({ [LIBRARY_KEY]: { archived: [], deleted } });
         const optional = optionalResetPermissions(chrome.runtime.getManifest(), await chrome.permissions.getAll());
         if ((optional.origins.length || optional.permissions.length) && !await chrome.permissions.remove(optional)) {
           throw new Error('기록과 개인 설정은 삭제했지만 일부 선택 권한을 회수하지 못했습니다. 다시 초기화하거나 Chrome 설정을 확인하세요.');

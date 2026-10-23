@@ -5,10 +5,10 @@
 | 계층 | 위치 | 역할 |
 |---|---|---|
 | 공통 실행·UI | `extension/` | 아이콘, 설정, 진행 상태, DOM/SAP 어댑터, 기록기 |
-| 사이트·공개 예제 | `profiles/`, `scripts/examples/` | 페이지 범위, 프레임 연결, 공개할 수 있는 흐름 |
+| 개발용 예제 | `profiles/`, `scripts/examples/` | 페이지 범위·프레임 연결·흐름의 참고 소스, 기본 설치 제외 |
 | 개인 작업 | `local/` | 실제 입력값, 결재자, 개인 매크로, 캡처 |
 
-`tools/build.mjs`가 기본 실행 목록과 manifest를 만든다. 개인 스크립트 폴더를 연결하면 `scripts/runtime.js`가 그 폴더의 변경을 별도로 등록한다. 개인 스크립트만 변경하면 확장 새로고침이 필요 없다. 공통 확장·manifest 변경은 빌드와 확장 새로고침으로 적용한다.
+`tools/build.mjs`가 실행 목록과 manifest를 만든다. 새 설치의 목록과 사이트 권한은 비어 있으며 UNIST 예제도 자동 등록하지 않는다. 개인 빌드에만 `local/scripts/`의 활성 스크립트와 해당 사이트 범위를 포함한다. 개인 스크립트 폴더를 연결하면 `scripts/runtime.js`가 그 폴더의 변경을 별도로 등록한다. 개인 스크립트만 변경하면 확장 새로고침이 필요 없다. 공통 확장·manifest 변경은 빌드와 확장 새로고침으로 적용한다.
 
 공통 네임스페이스는 `window.MacroStudio`이다. `features`는 사이트 기능, `launcher`는 스크립트 등록 UI, `dom`·`sap`는 입력 어댑터다. content script의 world마다 별도 네임스페이스가 있다.
 
@@ -20,7 +20,7 @@
 
 ## 스크립트 보관함
 
-빌드는 `core/script-catalog.json`에 스크립트 id·이름·사이트 범위를 생성한다. 개인용 카탈로그만 개인 스크립트와 개인 표시 이름을 포함한다. `script.json`의 id와 `launcher.register()`의 id는 같고 다른 스크립트와 겹치지 않아야 한다.
+빌드는 `core/script-catalog.json`에 스크립트 id·이름·사이트 범위를 생성한다. 공유용 카탈로그와 개인 스크립트가 없는 새 개인용 카탈로그는 빈 배열이다. 개인용 카탈로그만 개인 스크립트를 포함한다. `script.json`의 id와 `launcher.register()`의 id는 같고 다른 스크립트와 겹치지 않아야 한다.
 
 보관·삭제 id는 서비스 워커가 `chrome.storage.local`의 `macroStudioScriptLibrary`에 직렬 저장한다. 페이지에서는 ISOLATED listener가 런처 안의 실제 사용자 클릭만 보관 요청으로 전달한다. 워커는 sender·카탈로그·사이트 범위를 확인한다. 복원·삭제는 확장 전용 `ui/library.html`에서만 허용한다.
 
@@ -32,7 +32,7 @@ MAIN world에는 DOM 이벤트로 표시 상태만 전달한다. 이 이벤트�
 
 `scripts/directory.js`는 읽기 권한을 받은 `local/scripts` 디렉터리의 `script.json`과 명시한 `.js`만 읽는다. 폴더 핸들과 원본·컴파일된 코드의 정상 스냅샷은 확장 IndexedDB에 저장한다. 공개 저장소와 페이지의 저장소에는 쓰지 않는다. `chrome.storage.local`에는 목록 갱신용 revision·개수·오류 상태만 전달한다.
 
-Chrome `userScripts`에 코드를 등록·갱신하고, 허용된 현재 페이지에도 주입한다. 공통 런처를 사용자 코드에 일시적으로 대신 제공해 UI 정의와 `run`을 수집한다. 코드 자체는 해당 MAIN 또는 USER_SCRIPT world에 유지하고 UI의 데이터만 공통 런처에 전달한다. 프로파일의 공통 MAIN 기능은 프로토타입을 통해 재사용하며 개인 feature 설정은 별도 객체에 둔다.
+Chrome `userScripts`에 코드를 등록·갱신하고, 허용된 현재 페이지에도 주입한다. 공통 런처를 사용자 코드에 일시적으로 대신 제공해 UI 정의와 `run`을 수집한다. 코드 자체는 해당 MAIN 또는 USER_SCRIPT world에 유지하고 UI의 데이터만 공통 런처에 전달한다. 이미 로드된 공통 MAIN 기능은 프로토타입을 통해 재사용할 수 있지만, UNIST 예제 기능은 기본 로드되지 않는다. 개인 feature 설정은 별도 객체에 둔다.
 
 런처의 실제 submit 이벤트를 ISOLATED listener가 shadow root 안에서 확인하고 id·revision·현재 입력값을 검증한 뒤에만 실행 요청을 보낸다. 워커도 tab·frame·사이트 범위·현재 revision·보관·삭제 상태를 검사한다. 진행 결과를 돌려주는 DOM 이벤트는 표시 용도다. 사용자 스크립트에 확장 API 메시징을 열지 않는다.
 
@@ -40,7 +40,7 @@ Chrome `userScripts`에 코드를 등록·갱신하고, 허용된 현재 페이�
 
 ## 기록
 
-`ui/reset.html`에서 명시적으로 확인한 초기화만 워커가 받는다. 사이트 content script에는 초기화 권한이 없다. 개인 실행 중에는 거부하며, 진행 중인 동기화·연결을 마친 뒤 사용자 코드 등록과 IndexedDB 원본을 지운다. 새 동기화와 실행은 그동안 진입하지 못한다. IndexedDB의 개인 정보 없는 reset epoch는 초기화 전에 열었던 폴더 선택기가 뒤늦게 핸들을 다시 저장하는 일을 막는다.
+`ui/reset.html`에서 명시적으로 확인한 초기화만 워커가 받는다. 사이트 content script에는 초기화 권한이 없다. 개인 실행 중에는 거부하며, 진행 중인 동기화·연결을 마친 뒤 사용자 코드 등록과 IndexedDB 원본을 지운다. 초기화 화면의 스크립트 개수는 보관 중이거나 빌드에 포함된 항목까지 계산한다. 초기화할 때 기본 카탈로그의 모든 id를 삭제 상태로 남겨, 빌드에 남은 예전 사본도 실행 목록이나 보관함에 되살아나지 않게 한다. 원본 파일과 빌드 파일 자체를 지우지는 않는다. 새 동기화와 실행은 그동안 진입하지 못한다. IndexedDB의 개인 정보 없는 reset epoch는 초기화 전에 열었던 폴더 선택기가 뒤늦게 핸들을 다시 저장하는 일을 막는다.
 
 기록은 탭 하나를 대상으로 하며, 사용자가 허용한 도메인의 프레임만 관찰한다. 서비스 워커가 sender의 탭·origin과 recording id를 검증하고, 이벤트를 정리해 `chrome.storage.session`에 직렬 저장한다. 워커가 중단되어도 같은 브라우저 세션에서 읽을 수 있다.
 
@@ -58,12 +58,13 @@ Chrome `userScripts`에 코드를 등록·갱신하고, 허용된 현재 페이�
 
 ## 빌드
 
-- `build`: 공개 소스 + `local/profiles/unist-travel.json` + 활성화된 `local/scripts/*/script.json` → `dist/`
-- `build:public`: 공개 소스만 → `dist-public/`
+- `build`: 공통 확장 + 활성화된 `local/scripts/*/script.json` → `dist/`
+- `build:public`: 공통 확장만, 스크립트 목록은 빈 배열 → `dist-public/`
+- `profiles/`, `scripts/examples/`, 과거의 `local/profiles/unist-travel.json`은 빌드가 읽거나 자동 등록하지 않는다.
 - 공유 빌드는 개인 디렉터리를 읽지 않는다.
 - staging 폴더에서 파일을 확인한 뒤 output을 교체한다. Chrome에서 업데이트하려면 빌드 후 확장과 페이지를 새로고침한다.
 
-새 사이트 프로필은 실제 진입점과 로드 순서를 검증해서 `profiles/`와 빌드 수집 로직에 추가한다. 개인적인 작업이라면 공개 프로필을 늘리기보다 `local/scripts/`를 먼저 사용한다.
+새 작업은 실제 진입점과 로드 순서를 검증해서 `local/scripts/<id>/script.json`에 명시한다. 참고용 사이트 프로필을 추가해도 빌드에 자동 포함되지 않는다.
 
 ## AI 연결 경계
 

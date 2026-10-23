@@ -137,8 +137,8 @@ test('step deletion preserves remaining recording metadata and the visible previ
   const preview = env.document.querySelector('#preview'), variables = env.document.querySelector('#variables');
   assert.equal(env.document.querySelectorAll('#steps select, #steps input').length, 0);
   assert.equal(preview.closest('details'), null);
-  assert.equal(env.document.querySelector('#goal').getAttribute('placeholder').includes('결재선 목록 선택'), true);
-  assert.equal(variables.getAttribute('placeholder'), '출장일, 출장 시간');
+  assert.doesNotMatch(env.document.querySelector('#goal').getAttribute('placeholder'), /출장|결재/);
+  assert.doesNotMatch(variables.getAttribute('placeholder'), /출장/);
   variables.value = '출장일, 출장 시간'; variables.dispatchEvent(new env.window.Event('input'));
   await env.click('#prompt');
   assert.equal(env.copied[0], preview.value);

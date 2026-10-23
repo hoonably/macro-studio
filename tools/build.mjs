@@ -27,15 +27,8 @@ async function folders(directory) {
 
 export async function build({ root = projectRoot, publicOnly = false } = {}) {
   const manifest = await readJSON(path.join(root, 'extension/manifest.base.json'));
-  const profile = await readJSON(path.join(root, 'profiles/unist.json'));
-  const content = profile.entries.map(entry => ({
-    matches: entry.matches.map(validateMatch),
-    js: entry.files.map(safeFile),
-    world: entry.world, all_frames: !!entry.allFrames, run_at: 'document_idle'
-  }));
-  const catalog = [{ id: profile.scriptId, name: profile.scriptName,
-    matches: [...new Set(content.flatMap(entry => entry.matches))] }];
-  if (!validId(profile.scriptId)) throw new Error('사이트 프로필의 스크립트 id를 확인하세요.');
+  // Examples are reference source, never preinstalled scripts or site permissions.
+  const content = [], catalog = [];
   const localScripts = [];
   // A fresh clone must be connectable before the user creates their first script.
   if (!publicOnly) await fs.mkdir(path.join(root, 'local/scripts'), { recursive: true });
@@ -67,36 +60,31 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
       }
     }
   }
-  const origins = [...new Set([...profile.origins, ...content.flatMap(entry => entry.matches.map(pattern => {
+  const origins = [...new Set(content.flatMap(entry => entry.matches.map(pattern => {
     const match = pattern.match(/^(https?:\/\/[^/]+)\//);
     return match[1] + '/*';
-  }))])];
+  })))];
   manifest.host_permissions = origins;
   // Privileged recording stays in the extension's isolated world.
   const bridgeFiles = ['core/namespace.js', 'ui/launcher.js', 'core/studio-entry.js', 'recorder/capture.js'];
-  manifest.content_scripts = [...content, { matches: origins, js: bridgeFiles,
+  if (origins.length) manifest.content_scripts = [...content, { matches: origins, js: bridgeFiles,
     world: 'ISOLATED', all_frames: true, run_at: 'document_idle' }];
-  let personal = null;
-  const privateFile = path.join(root, 'local/profiles/unist-travel.json');
-  if (!publicOnly && await exists(privateFile)) personal = await readJSON(privateFile);
-  if (personal?.name) catalog[0].name = String(personal.name);
   const output = path.join(root, publicOnly ? 'dist-public' : 'dist');
   const staging = output + '.building';
   await fs.rm(staging, { force: true, recursive: true });
   try {
     await fs.cp(path.join(root, 'extension'), staging, { recursive: true, filter: sourceOnly });
     await fs.rm(path.join(staging, 'manifest.base.json'));
-    await fs.cp(path.join(root, 'scripts/examples'), path.join(staging, 'scripts/examples'), { recursive: true, filter: sourceOnly });
     for (const file of localScripts) {
       const target = path.join(staging, file.target);
       await fs.mkdir(path.dirname(target), { recursive: true });
       await fs.copyFile(file.source, target);
     }
     await fs.writeFile(path.join(staging, 'core/config.js'), '"use strict";\nwindow.MacroStudio.config = Object.freeze(' +
-      JSON.stringify({ unistTravel: personal }) + ');\n');
+      JSON.stringify({}) + ');\n');
     await fs.writeFile(path.join(staging, 'core/script-catalog.json'), JSON.stringify(catalog, null, 2) + '\n');
     await fs.writeFile(path.join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-    for (const entry of manifest.content_scripts) for (const file of entry.js) {
+    for (const entry of manifest.content_scripts || []) for (const file of entry.js) {
       if (!await exists(path.join(staging, safeFile(file)))) throw new Error('등록 파일이 없습니다: ' + file);
     }
     for (const file of ['background.js', 'core/script-library.js', 'core/site-settings.js', 'core/script-catalog.json', 'ui/studio.html',
@@ -110,9 +98,9 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
     await fs.rm(staging, { force: true, recursive: true });
     throw error;
   }
-  return { output, manifest, personal: !!personal, scripts: localScripts.length };
+  return { output, manifest, personal: catalog.length > 0, scripts: catalog.length };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const result = await build({ publicOnly: process.argv.includes('--public') });
-  console.log('Built ' + result.output + (result.personal ? ' (개인 설정 포함 · 공유 금지)' : ' (공개 예제)'));
+  console.log('Built ' + result.output + (result.personal ? ' (개인 스크립트 포함 · 공유 금지)' : ' (스크립트 없는 기본 설치)'));
 }

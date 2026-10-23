@@ -43,7 +43,7 @@ local/scripts/weekly-task/
 
 같은 폴더가 이미 있으면 덮어쓰지 않는다. 폴더 이름과 `script.json`의 `id`는 같아야 한다. 생성만 한 템플릿은 미구현 오류를 표시하므로 실제 작업을 구현해야 한다. 연결된 폴더에서는 저장하면 자동 등록되므로 개인 스크립트만 추가·수정할 때 확장을 새로고침하지 않는다. [폴더 연결](script-sync.md)
 
-`launcher.register()`의 id도 `script.json`과 같게 유지한다. 이 id를 기준으로 스크립트 보관·복원·삭제 상태를 기억한다. `unist-travel` 등 기존 스크립트의 id와 겹치지 않게 만든다.
+`launcher.register()`의 id도 `script.json`과 같게 유지한다. 이 id를 기준으로 스크립트 보관·복원·삭제 상태를 기억한다. 이미 등록한 다른 개인 스크립트의 id와 겹치지 않게 만든다.
 
 ## 일반 DOM 예시
 
@@ -76,9 +76,9 @@ await studio.dom.waitFor(() => document.querySelector('[data-testid="request-for
 
 ## SAP / iframe
 
-UNIST 예제는 `profiles/unist.json`의 MAIN world에서 SAP 기본 API를 사용한다. 포탈과 SAP가 다른 출처라 각 프레임에 코드가 필요하고, 서로 origin·source·실행 id·문서 instance를 검증한다. 범용 녹화기만으로 이 구조가 완전히 재현되지는 않는다. 녹화의 `sapField`와 실제 화면을 함께 확인한다.
+개발용 UNIST 예제의 MAIN world·로드 순서는 `profiles/unist.json`에 기록되어 있다. 이 프로필과 예제 코드는 기본 설치되지 않으므로 필요한 부분을 개인 스크립트에 명시적으로 포함한다. 포탈과 SAP가 다른 출처라 각 프레임에 코드가 필요하고, 서로 origin·source·실행 id·문서 instance를 검증한다. 범용 녹화기만으로 이 구조가 완전히 재현되지는 않는다. 녹화의 `sapField`와 실제 화면을 함께 확인한다.
 
-개인 스크립트에서 SAP 어댑터가 필요하면 `script.json`의 해당 entry에서 `"world": "MAIN"`, `"adapters": ["sap"]`로 정한다. DOM과 함께 쓰려면 `["dom", "sap"]`로 지정한다. 복잡한 프레임 흐름은 사이트 프로필을 만든다. `MAIN`에서는 확장 전용 API를 직접 사용할 수 없다.
+개인 스크립트에서 SAP 어댑터가 필요하면 `script.json`의 해당 entry에서 `"world": "MAIN"`, `"adapters": ["sap"]`로 정한다. DOM과 함께 쓰려면 `["dom", "sap"]`로 지정한다. 복잡한 프레임 흐름은 각 프레임의 범위와 로드 순서를 별도 entry로 명시한다. `MAIN`에서는 확장 전용 API를 직접 사용할 수 없다.
 
 ## 검증과 적용
 
