@@ -57,7 +57,11 @@
     } catch { return null; }
   }
   function send(type, more = {}) {
-    sapFrame()?.contentWindow.postMessage({ channel: CHANNEL, type, ...more }, SAP);
+    const frame = sapFrame();
+    // 메뉴 제목이 먼저 바뀌어도 프레임에는 포탈/빈 문서가 남아 있을 수 있습니다.
+    // 포탈에서 읽을 수 있는 문서는 SAP가 아니므로 전환될 때까지 기다립니다.
+    if (!frame?.contentWindow || frame.contentDocument) return;
+    frame.contentWindow.postMessage({ channel: CHANNEL, type, ...more }, SAP);
   }
   function finish(error) {
     if (!job) return;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { context, load } from './helpers.mjs';
+import { context, load, tick } from './helpers.mjs';
 
 const configuration = { destination: '방문 지역', organization: '방문 기관', purpose: '업무 미팅', memo: '검토용 메모',
   approvalLine: '[출장] 예제 결재선', approvers: ['검토자A', '승인자B'] };
@@ -11,6 +11,81 @@ async function travel(config) {
   await load(env.ctx, ...files.slice(1));
   return { ...env, helper: env.window.MacroStudio, feature: env.window.MacroStudio.features.travelRequest };
 }
+async function portalNavigation() {
+  const env = await travel(configuration);
+  const { ctx, document, window, helper } = env;
+  delete env.feature.portalNavigationRegistered;
+  const intervals = new Map(), timeouts = new Map(), messages = [];
+  let timerId = 0, origin = 'https://portal.unist.ac.kr', definition;
+  ctx.setInterval = callback => { const id = ++timerId; intervals.set(id, callback); return id; };
+  ctx.clearInterval = id => intervals.delete(id);
+  ctx.setTimeout = (callback, delay) => { const id = ++timerId; timeouts.set(id, { callback, delay }); return id; };
+  ctx.clearTimeout = id => timeouts.delete(id);
+  document.body.innerHTML = '<div toptabindex="9" isselected="true">일반행정</div><div subtabindex="0" isselected="true">인사</div><div nodetitle="국내출장 신청" isselected="true"></div><iframe id="contentAreaFrame"></iframe>';
+  const area = context('<html><body><iframe id="isolatedWorkArea" title="국내출장 신청"></iframe></body></html>').document;
+  window.top = window;
+  const frame = area.getElementById('isolatedWorkArea');
+  // The frame title changes before its portal/blank document navigates to SAP.
+  Object.defineProperty(document.getElementById('contentAreaFrame'), 'contentDocument', { value: area });
+  Object.defineProperty(frame, 'contentDocument', { get: () => origin === 'https://portal.unist.ac.kr' ? area : null });
+  const recipient = { postMessage(message, targetOrigin) {
+    messages.push({ message: JSON.parse(JSON.stringify(message)), targetOrigin });
+    if (origin !== targetOrigin) throw new Error('postMessage target origin does not match recipient origin');
+  } };
+  Object.defineProperty(frame, 'contentWindow', { value: recipient });
+  helper.launcher = { create: () => ({ register: item => { definition = item; } }) };
+  await load(ctx, 'scripts/examples/unist-travel/config.js', 'scripts/examples/unist-travel/navigation.js');
+  return { ...env, intervals, timeouts, messages,
+    enterSAP: () => { origin = 'https://s4hana.unist.ac.kr'; },
+    start: () => definition.run({ date: '2026-10-23' }, () => {}).then(value => ({ value }), error => ({ error })),
+    receive: (message, source = recipient, senderOrigin = 'https://s4hana.unist.ac.kr') => {
+      const event = new window.Event('message');
+      Object.assign(event, { source, origin: senderOrigin, data: { channel: 'macro-studio-unist-travel-v1', ...message } });
+      window.dispatchEvent(event);
+    }
+  };
+}
+test('portal waits through the same-origin loading document, then authenticates SAP messages and stops probing', async () => {
+  const env = await portalNavigation();
+  const result = env.start();
+  await tick();
+  assert.equal(env.messages.length, 0, 'Do not send SAP probes to the temporary portal document');
+  assert.equal(env.intervals.size, 1);
+  const probe = [...env.intervals.values()][0];
+  probe(); probe();
+  assert.equal(env.messages.length, 0);
+  env.enterSAP(); probe();
+  assert.equal(env.messages.length, 1);
+  assert.equal(env.messages[0].message.type, 'probe');
+  assert.equal(env.messages[0].targetOrigin, 'https://s4hana.unist.ac.kr');
+  env.receive({ type: 'ready', instance: 'sap-document' }, {});
+  env.receive({ type: 'ready', instance: 'sap-document' }, undefined, 'https://portal.unist.ac.kr');
+  assert.equal(env.messages.length, 1, 'Other windows and origins cannot start the request');
+  env.receive({ type: 'ready', instance: 'sap-document' });
+  const run = env.messages[1].message;
+  assert.equal(run.type, 'run');
+  assert.equal(run.date, '2026.10.23');
+  assert.equal(env.messages[1].targetOrigin, 'https://s4hana.unist.ac.kr');
+  env.receive({ type: 'started', instance: run.instance, id: 'wrong-job' });
+  assert.equal(env.intervals.size, 1);
+  env.receive({ type: 'started', instance: run.instance, id: run.id });
+  assert.equal(env.intervals.size, 0);
+  env.receive({ type: 'complete', instance: run.instance, id: run.id });
+  assert.match((await result).value, /결재선 준비 완료/);
+  assert.equal(env.timeouts.size, 0);
+});
+test('portal loading that never reaches SAP times out and clears probes without origin errors', async () => {
+  const env = await portalNavigation();
+  const result = env.start();
+  await tick();
+  const timeout = [...env.timeouts.values()].find(timer => timer.delay === 180000);
+  assert.ok(timeout);
+  timeout.callback();
+  assert.match((await result).error.message, /출장 신청 화면이 준비되지 않았습니다/);
+  assert.equal(env.messages.length, 0);
+  assert.equal(env.intervals.size, 0);
+  assert.equal(env.timeouts.size, 0);
+});
 test('public UNIST example refuses to navigate or fill without personal settings', async () => {
   const { ctx, feature } = await travel(null);
   await load(ctx, 'scripts/examples/unist-travel/config.js', 'scripts/examples/unist-travel/fill.js');
