@@ -21,7 +21,7 @@ const allowed = (state, sender) => state?.status === 'recording' && sender.tab?.
 const controlPage = sender => sender.id === chrome.runtime.id && sender.url?.startsWith(chrome.runtime.getURL('ui/'));
 const readSites = async () => siteSettings((await chrome.storage.local.get(SITES_KEY))[SITES_KEY]);
 async function requireSiteOn(origin) {
-  if ((await readSites())[origin] === false) throw new Error('도구모음의 Macro Studio에서 이 사이트에 적용을 ON으로 켜주세요.');
+  if (!siteEnabled(await readSites(), origin)) throw new Error('도구모음의 Macro Studio에서 이 사이트에 적용을 ON으로 켜주세요.');
 }
 const localScripts = createScriptRuntime(chrome, { changed: refreshOpenTabs });
 async function refreshOpenTabs() {
@@ -89,24 +89,15 @@ async function scripts(message, sender) {
   const ids = new Set(available.map(script => script.id));
   const view = { ready: true, available: available.filter(script => !script.unavailable).map(script => script.id), archived: state.archived.filter(id => ids.has(id)), deleted: state.deleted.filter(id => ids.has(id)) };
   return ui ? { ...view, catalog: all.filter(script => !state.deleted.includes(script.id)) } :
-    { ...view, siteEnabled: siteEnabled(await readSites(), siteOrigin(sender.url), available, state) };
+    { ...view, siteEnabled: siteEnabled(await readSites(), siteOrigin(sender.url)) };
 }
 
 async function siteView(info) {
-  const all = await localScripts.catalog(await catalog());
-  const available = all.filter(script => script.matches.some(pattern => matchesSite(pattern, info.url)));
-  const library = libraryState((await chrome.storage.local.get(LIBRARY_KEY))[LIBRARY_KEY]);
   return { tabId: info.tabId, origin: info.origin, pattern: info.pattern, allowed: info.topAllowed,
-    enabled: info.topAllowed && siteEnabled(await readSites(), info.origin, available, library) };
-}
-async function inspectSite(tabId) {
-  const info = await inspectFrames(chrome, tabId);
-  // The path is used only for matching the current page's scripts, never stored or returned.
-  const tab = await chrome.tabs.get(tabId);
-  return { ...info, url: siteOrigin(tab.url) === info.origin ? tab.url : info.origin + '/' };
+    enabled: info.topAllowed && siteEnabled(await readSites(), info.origin) };
 }
 async function setSite(message) {
-  const info = await inspectSite(message.tabId);
+  const info = await inspectFrames(chrome, message.tabId);
   if (message.origin !== info.origin) throw new Error('페이지 주소가 바뀌었습니다. 팝업을 다시 열어주세요.');
   if (typeof message.enabled !== 'boolean') throw new Error('사이트 적용 상태를 확인하세요.');
   if (message.enabled) await connectCapture(info);
@@ -167,7 +158,10 @@ async function handle(message, sender) {
     catch (error) { return { error: error.message }; }
   }
   if (message.type === 'local:run') {
-    await requireSiteOn(siteOrigin(sender.url));
+    // The toggle belongs to the tab's top-level site, including runs in permitted child frames.
+    const origin = sender.frameId > 0 && sender.tab ?
+      (await inspectFrames(chrome, sender.tab.id)).origin : siteOrigin(sender.url);
+    await requireSiteOn(origin);
     return localScripts.run(message, sender);
   }
   if (message.type === 'capture:status') {
@@ -231,7 +225,7 @@ async function handle(message, sender) {
         return { reset: true };
       });
     }
-    case 'site:state': return siteView(await inspectSite(message.tabId));
+    case 'site:state': return siteView(await inspectFrames(chrome, message.tabId));
     case 'site:set': return setSite(message);
     case 'local:status': return localScripts.status();
     case 'local:sync': return localScripts.sync(await catalog());

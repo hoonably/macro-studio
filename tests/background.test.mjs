@@ -9,7 +9,8 @@ import { inspectFrames, sitePattern } from '../extension/recorder/frames.js';
 import { createScriptRuntime } from '../extension/scripts/runtime.js';
 import { optionalResetPermissions } from '../extension/core/reset.js';
 import { SITES_KEY, siteOrigin, siteSettings, siteEnabled } from '../extension/core/site-settings.js';
-async function worker({ local = {}, origins = ['https://example.test/*'], permissions = [],
+// Most recorder tests model a site the user has already enabled. First-run/reset tests pass local: {}.
+async function worker({ local = { [SITES_KEY]: { 'https://example.test': true } }, origins = ['https://example.test/*'], permissions = [],
   frames = [{ frameId: 0, url: 'https://example.test/form' }], catalog = [
   { id: 'weekly-task', name: '주간 작업', matches: ['https://example.test/*'] },
   { id: 'other-task', name: '다른 작업', matches: ['https://other.test/*'] }
@@ -92,6 +93,7 @@ test('new sites with a hidden tab URL use the approved top-frame lookup and rema
     assert.equal((await env.send({ type: 'recording:start', tabId: 42 })).ok, false);
     assert.equal(env.calls.some(call => call[0] === 'inject'), false);
     env.origins.push(origin + '/*');
+    assert.equal((await env.send({ type: 'site:set', tabId: 42, origin, enabled: true })).ok, true);
     assert.equal((await env.send({ type: 'studio:activate', tabId: 42, origin: 'https://old.test' })).ok, false);
     assert.equal((await env.send({ type: 'studio:activate', tabId: 42, origin })).ok, true);
     const started = await env.send({ type: 'recording:start', tabId: 42 });
@@ -247,7 +249,7 @@ test('revoking site access stops active recording', async () => {
 });
 
 test('site toggle persists without scripts, validates origin and permissions, and never opens the panel', async () => {
-  const env = await worker({ catalog: [], origins: [] });
+  const env = await worker({ catalog: [], origins: [], local: {} });
   const change = { type: 'site:set', tabId: 42, origin: 'https://example.test', enabled: true };
   assert.equal((await env.send({ type: 'site:state', tabId: 42 })).value.enabled, false);
   assert.equal((await env.send(change, env.content)).ok, false, 'Only extension UI can change site preferences');
@@ -270,7 +272,7 @@ test('site toggle persists without scripts, validates origin and permissions, an
   assert.equal((await restarted.send({ type: 'scripts:state' }, other)).value.siteEnabled, false);
 });
 
-test('existing scripts remain enabled by default but OFF wins and stops recording without dropping steps', async () => {
+test('explicit ON enables the site, and OFF stops recording without dropping steps', async () => {
   const env = await worker();
   assert.equal((await env.send({ type: 'site:state', tabId: 42 })).value.enabled, true);
   const start = await env.send({ type: 'recording:start', tabId: 42 });
@@ -281,11 +283,11 @@ test('existing scripts remain enabled by default but OFF wins and stops recordin
   assert.equal((await env.send({ type: 'scripts:state' }, env.content)).value.siteEnabled, false);
   assert.match((await env.send({ type: 'recording:start', tabId: 42 })).error, /ON/);
   assert.match((await env.send({ type: 'local:run' }, env.content)).error, /ON/);
-  assert.equal((await env.send({ type: 'scripts:state' }, { ...env.content, url: 'https://other.test/form' })).value.siteEnabled, true);
+  assert.equal((await env.send({ type: 'scripts:state' }, { ...env.content, url: 'https://other.test/form' })).value.siteEnabled, false);
 });
 
 test('failed launcher injection does not save ON, and page-scoped scripts agree with the popup', async () => {
-  const env = await worker({ catalog: [{ id: 'task', matches: ['https://example.test/other/*'] }] });
+  const env = await worker({ catalog: [{ id: 'task', matches: ['https://example.test/other/*'] }], local: {} });
   assert.equal((await env.send({ type: 'site:state', tabId: 42 })).value.enabled, false);
   assert.equal((await env.send({ type: 'scripts:state' }, env.content)).value.siteEnabled, false);
   env.chrome.scripting.executeScript = async () => { throw new Error('Cannot access this page'); };
@@ -317,4 +319,50 @@ test('reset preview is read-only and only an explicit own reset-page confirmatio
   assert.deepEqual(JSON.parse(JSON.stringify(env.calls.find(call => call[0] === 'remove-permissions')[1])), { origins: ['https://extra.test/*'], permissions: ['webNavigation'] });
   assert.equal((await env.send({ type: 'local:sync' })).value.count, 0);
   assert.equal(env.local.macroStudioLocalScripts, undefined, 'An idle sync must not restore deleted sync state');
+});
+
+test('bundled UNIST sites stay OFF on a fresh install and after reset despite retained host permissions', async () => {
+  const origins = ['https://portal.unist.ac.kr/*', 'https://s4hana.unist.ac.kr/*'];
+  const catalog = [{ id: 'unist-travel', name: '출장 예제', matches: origins }];
+  for (const origin of origins.map(pattern => pattern.slice(0, -2))) {
+    const options = { origins, catalog, local: {} };
+    let env = await worker(options);
+    const prepare = () => {
+      env.chrome.tabs.get = async id => ({ id, url: origin + '/page' });
+      env.chrome.runtime.getManifest = () => ({ host_permissions: origins });
+      return { ...env.content, url: origin + '/page' };
+    };
+    let sender = prepare();
+    const assertOff = async () => {
+      const popup = (await env.send({ type: 'site:state', tabId: 42 })).value;
+      assert.equal(popup.allowed, true, 'Permission alone does not imply site opt-in');
+      assert.equal(popup.enabled, false);
+      const page = (await env.send({ type: 'scripts:state' }, sender)).value;
+      assert.ok(page.available.includes('unist-travel'), 'The bundled example is still present');
+      assert.equal(page.siteEnabled, false, 'The launcher stays hidden');
+      assert.match((await env.send({ type: 'recording:start', tabId: 42 })).error, /ON/);
+      assert.match((await env.send({ type: 'studio:activate', tabId: 42, origin })).error, /ON/);
+      assert.match((await env.send({ type: 'local:run' }, sender)).error, /ON/);
+    };
+    await assertOff();
+    assert.equal((await env.send({ type: 'site:set', tabId: 42, origin, enabled: true })).value.enabled, true);
+    assert.equal((await env.send({ type: 'scripts:state' }, sender)).value.siteEnabled, true);
+    const reset = await env.send({ type: 'reset:confirm', confirmed: true }, { ...env.ui, url: 'chrome-extension://studio/ui/reset.html' });
+    assert.equal(reset.ok, true, reset.error);
+    await env.send({ type: 'local:sync' });
+    await assertOff();
+    env = await worker(options); sender = prepare();
+    await assertOff();
+    assert.equal((await env.send({ type: 'site:set', tabId: 42, origin, enabled: true })).value.enabled, true);
+  }
+});
+
+test('a permitted child-frame run uses the top-level site opt-in, not a separate child preference', async () => {
+  const env = await worker({ origins: ['https://example.test/*', 'https://child.test/*'] });
+  const response = await env.send({ type: 'local:run' }, { ...env.content, frameId: 7, url: 'https://child.test/form' });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /스크립트/); // Site opt-in passes; the missing script is still rejected by the runtime.
+  assert.doesNotMatch(response.error, /ON/);
+  env.local[SITES_KEY] = {};
+  assert.match((await env.send({ type: 'local:run' }, { ...env.content, frameId: 7, url: 'https://child.test/form' })).error, /ON/);
 });

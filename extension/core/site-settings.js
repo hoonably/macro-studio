@@ -13,8 +13,7 @@ export function siteSettings(value) {
     siteOrigin(origin) === origin && typeof enabled === 'boolean'));
 }
 
-// Preserve existing script sites until the user explicitly chooses ON or OFF.
-export function siteEnabled(settings, origin, scripts, library) {
-  if (typeof settings[origin] === 'boolean') return settings[origin];
-  return scripts.some(script => !script.unavailable && !library.deleted.includes(script.id));
+// A bundled or newly synced script never opts a site in on the user's behalf.
+export function siteEnabled(settings, origin) {
+  return settings[origin] === true;
 }
