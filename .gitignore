@@ -1,8 +1,10 @@
 node_modules/
 dist/
 dist-public/
+dist-store/
 dist.building/
 dist-public.building/
+dist-store.building/
 artifacts/
 local/*
 !local/README.md

@@ -86,3 +86,14 @@ test('capture reconnects using response envelope, ignores password and untrusted
   trusted(window, document.querySelector('button'), 'click'); await tick();
   assert.equal(messages.filter(message => message.event?.action === 'click').length, 0);
 });
+
+test('store prompts are self-contained and do not require a clone or build', () => {
+  const prompt = agentPrompt({ name: '내 작업', steps: [] }, { standalone: true, goal: '입력까지' });
+  assert.match(prompt, /scripts\/<id>\//);
+  assert.match(prompt, /script\.json 형식/);
+  assert.match(prompt, /launcher\.create\(\)\.register/);
+  assert.match(prompt, /사용자 스크립트 허용/);
+  assert.doesNotMatch(prompt, /AGENTS\.md|npm run verify|local\/scripts|이 저장소/);
+  assert.match(prompt, /관찰 자료/);
+  assert.match(prompt, /최종 제출/);
+});

@@ -1,0 +1,5 @@
+// Configured project name; public deployment is pending.
+{
+  "name": "macro-studio",
+  "pages_build_output_dir": "./website"
+}

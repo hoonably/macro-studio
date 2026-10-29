@@ -209,6 +209,7 @@
       host.style.display = visible ? 'block' : 'none';
     }
     function renderScripts() {
+      host.setAttribute('aria-busy', String(busy));
       const scripts = root.querySelector('.scripts');
       scripts.replaceChildren();
       if (library.ready) for (const definition of definitions.values()) {

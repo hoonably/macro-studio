@@ -5,12 +5,12 @@ import { context, code, tick } from './helpers.mjs';
 import { agentPrompt, exportRecording, MAX_STEPS, normalizeEvent } from '../extension/recorder/model.js';
 import { sitePattern } from '../extension/recorder/frames.js';
 
-async function studio({ enabled = false, sites = [], initialRecording = null } = {}) {
+async function studio({ enabled = false, sites = [], initialRecording = null, session = {} } = {}) {
   let active = { id: 42, url: 'https://example.test/form' }, recording = structuredClone(initialRecording), approve = true, gesture = false, poll, activated, clipboardFailure = false;
   const permissionCalls = [], messages = [], copied = [];
   let frameResult = null;
   const chrome = {
-    runtime: { sendMessage: async message => {
+    runtime: { id: 'studio', onMessage: { addListener() {} }, sendMessage: async message => {
       messages.push(message);
       if (message.type === 'studio:state') return { ok: true, value: recording };
       if (message.type === 'local:status') return { ok: true, value: { connected: false, count: 0 } };
@@ -43,13 +43,13 @@ async function studio({ enabled = false, sites = [], initialRecording = null } =
       }, onAdded: { addListener() {} }, onRemoved: { addListener() {} }
     },
     tabs: { query: async () => [active], onActivated: { addListener: callback => { activated = callback; } }, onUpdated: { addListener() {} } },
-    storage: { onChanged: { addListener() {} } }
+    storage: { session: { get: async key => ({ [key]: session[key] }), set: async values => Object.assign(session, values) }, onChanged: { addListener() {} } }
   };
   const navigator = { clipboard: { writeText: async value => { if (clipboardFailure) throw new Error('Clipboard unavailable'); copied.push(value); } } };
-  const env = context(await code('extension/ui/studio.html'), { chrome, navigator, URL, agentPrompt, exportRecording, MAX_STEPS, sitePattern,
+  const env = context(await code('extension/ui/studio.html'), { STORE_BUILD: false, chrome, navigator, URL, agentPrompt, exportRecording, MAX_STEPS, sitePattern,
     setInterval: callback => { poll = callback; return 1; } });
   await vm.runInContext('(async () => {' + (await code('extension/ui/studio.js')).replace(/^import[^\n]+\n/gm, '') + '\n})()', env.ctx);
-  return { ...env, sites, permissionCalls, messages, copied,
+  return { ...env, sites, permissionCalls, messages, copied, session,
     setFrameResult: value => { frameResult = value; },
     setApproval: value => { approve = value; },
     failClipboard: () => { clipboardFailure = true; },
@@ -137,8 +137,8 @@ test('step deletion preserves remaining recording metadata and the visible previ
   const preview = env.document.querySelector('#preview'), variables = env.document.querySelector('#variables');
   assert.equal(env.document.querySelectorAll('#steps select, #steps input').length, 0);
   assert.equal(preview.closest('details'), null);
-  assert.doesNotMatch(env.document.querySelector('#goal').getAttribute('placeholder'), /출장|결재/);
-  assert.doesNotMatch(variables.getAttribute('placeholder'), /출장/);
+  assert.equal(env.document.querySelector('#goal').value, '', 'Example text is a hint, not an automation instruction');
+  assert.equal(variables.value, '', 'Example variables are not included until the user enters them');
   variables.value = '출장일, 출장 시간'; variables.dispatchEvent(new env.window.Event('input'));
   await env.click('#prompt');
   assert.equal(env.copied[0], preview.value);
@@ -154,4 +154,19 @@ test('step deletion preserves remaining recording metadata and the visible previ
   env.failClipboard(); await env.click('#prompt');
   assert.equal(selected, true, 'Clipboard failures select the visible preview without relying on a removed toggle');
   assert.match(env.document.querySelector('#status').textContent, /직접 복사/);
+});
+
+test('studio descriptions and changing values survive an extension update and remain part of the copied prompt', async () => {
+  const recording = { name: 'Original name', status: 'stopped', steps: [{ id: 'field', ...normalizeEvent({ action: 'input', page: { url: 'https://example.test/form' }, target: { label: 'date' }, value: '2026-10-24' }) }] };
+  const env = await studio({ enabled: true, initialRecording: recording });
+  for (const [id, value] of [['name', 'My task'], ['goal', 'Open form and stop before submit'], ['variables', 'date, time']]) {
+    const input = env.document.getElementById(id); input.value = value; input.dispatchEvent(new env.window.Event('input'));
+  }
+  await tick();
+  const reopened = await studio({ enabled: true, initialRecording: recording, session: env.session });
+  assert.equal(reopened.document.getElementById('name').value, 'My task');
+  assert.equal(reopened.document.getElementById('goal').value, 'Open form and stop before submit');
+  assert.equal(reopened.document.getElementById('variables').value, 'date, time');
+  await reopened.click('#prompt');
+  assert.match(reopened.copied[0], /변경할 값: date, time/);
 });

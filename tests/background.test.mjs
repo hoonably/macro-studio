@@ -9,21 +9,26 @@ import { inspectFrames, sitePattern } from '../extension/recorder/frames.js';
 import { createScriptRuntime } from '../extension/scripts/runtime.js';
 import { optionalResetPermissions } from '../extension/core/reset.js';
 import { SITES_KEY, siteOrigin, siteSettings, siteEnabled } from '../extension/core/site-settings.js';
+import { createBuildUpdater, LOADED_BUILD_KEY } from '../extension/core/build-updates.js';
+import { UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, availableVersion } from '../extension/core/update-notices.js';
 // Most recorder tests model a site the user has already enabled. First-run/reset tests pass local: {}.
 async function worker({ local = { [SITES_KEY]: { 'https://example.test': true } }, origins = ['https://example.test/*'], permissions = [],
+  stored = {}, storeBuild = false,
   frames = [{ frameId: 0, url: 'https://example.test/form' }], catalog = [
   { id: 'weekly-task', name: '주간 작업', matches: ['https://example.test/*'] },
   { id: 'other-task', name: '다른 작업', matches: ['https://other.test/*'] }
 ] } = {}) {
-  const state = {}, calls = [], lifecycle = {}, memory = {};
+  const state = {}, calls = [], lifecycle = {}, memory = stored;
+  const diskBuild = { id: '0'.repeat(64) };
   let listener;
   const removed = [];
   const event = () => ({ addListener() {} });
   const chrome = {
     runtime: { id: 'studio', getManifest: () => ({ host_permissions: ['https://example.test/*'], optional_permissions: ['webNavigation'] }), getURL: file => 'chrome-extension://studio/' + file,
-      onMessage: { addListener: value => { listener = value; } }, onInstalled: { addListener: value => { lifecycle.installed = value; } }, onStartup: event() },
-    storage: { session: { get: async key => ({ [key]: structuredClone(state[key]) }),
-      set: async value => Object.assign(state, structuredClone(value)), remove: async key => { delete state[key]; } },
+      sendMessage: async value => { calls.push(['extension-message', value]); return { saved: true }; }, reload: () => calls.push(['reload']),
+      onMessage: { addListener: value => { listener = value; } }, onInstalled: { addListener: value => { lifecycle.installed = value; } }, onStartup: event(), onUpdateAvailable: { addListener: value => { lifecycle.updateAvailable = value; } } },
+    storage: { session: { get: async keys => Object.fromEntries([].concat(keys).filter(key => state[key] !== undefined).map(key => [key, structuredClone(state[key])])),
+      set: async value => Object.assign(state, structuredClone(value)), remove: async keys => { for (const key of [].concat(keys)) delete state[key]; } },
       local: { get: async key => ({ [key]: structuredClone(local[key]) }), set: async value => Object.assign(local, structuredClone(value)), remove: async keys => { for (const key of [].concat(keys)) delete local[key]; } } },
     permissions: { remove: async value => { calls.push(['remove-permissions', value]); return true; }, getAll: async () => ({ origins, permissions }), contains: async query =>
       (query.origins || []).every(item => origins.some(pattern => matchesSite(pattern, item))) &&
@@ -33,19 +38,43 @@ async function worker({ local = { [SITES_KEY]: { 'https://example.test': true } 
       executeScript: async value => calls.push(['inject', value]) },
     tabs: { get: async id => ({ id, url: 'https://example.test/form' }), query: async () => [{ id: 42, url: 'https://example.test/form' }], sendMessage: async (...args) => calls.push(['send', args]),
       create: async options => calls.push(['create', options]), update: async (...args) => calls.push(['update-tab', ...args]), onRemoved: event() },
-    alarms: { create: async () => {}, onAlarm: event() },
+    alarms: { create: async (name) => calls.push(['alarm', name]), clear: async name => calls.push(['clear-alarm', name]), onAlarm: { addListener: value => { lifecycle.alarm = value; } } },
     sidePanel: { open: async value => calls.push(['open', value]), setPanelBehavior: async value => calls.push(['panel-behavior', value]) }
   };
   const source = (await code('extension/background.js')).replace(/^import[^\n]+\n/gm, '');
-  vm.runInNewContext(source, { chrome, MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent, LIBRARY_KEY, libraryState, matchesSite, changeLibrary, inspectFrames, sitePattern,
-    SITES_KEY, siteOrigin, siteSettings, siteEnabled, optionalResetPermissions,
+  vm.runInNewContext(source, { STORE_BUILD: storeBuild, chrome, MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent, LIBRARY_KEY, libraryState, matchesSite, changeLibrary, inspectFrames, sitePattern,
+    SITES_KEY, siteOrigin, siteSettings, siteEnabled, optionalResetPermissions, createBuildUpdater, UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, availableVersion,
     createScriptRuntime: (browser, options) => createScriptRuntime(browser, { ...options, read: async key => memory[key], write: async values => Object.assign(memory, values), clear: async () => { for (const key of Object.keys(memory)) delete memory[key]; } }),
-    fetch: async () => ({ ok: true, json: async () => structuredClone(catalog) }), crypto: webcrypto, URL, console, Date });
+    fetch: async url => ({ ok: true, json: async () => structuredClone(url.endsWith('/core/build-info.json') ? diskBuild : catalog) }),
+    setTimeout: callback => { callback(); return 0; }, crypto: webcrypto, URL, console, Date });
   const ui = { id: 'studio', url: 'chrome-extension://studio/ui/studio.html' };
   const content = { id: 'studio', url: 'https://example.test/form?token=private', frameId: 0, tab: { id: 42 } };
   const send = (message, sender = ui) => new Promise(resolve => listener(message, sender, resolve));
-  return { state, local, memory, chrome, calls, send, ui, content, removed, origins, permissions, frames, lifecycle };
+  return { state, local, memory, chrome, calls, send, ui, content, removed, origins, permissions, frames, lifecycle, diskBuild };
 }
+test('store distribution uses Chrome updates while keeping folder sync enabled', async () => {
+  const env = await worker({ storeBuild: true });
+  await env.lifecycle.installed();
+  assert.ok(env.calls.some(call => call[0] === 'alarm' && call[1] === 'macro-studio-script-sync'));
+  assert.ok(env.calls.some(call => call[0] === 'clear-alarm' && call[1] === 'macro-studio-build-check'));
+  assert.ok(!env.calls.some(call => call[0] === 'alarm' && call[1] === 'macro-studio-build-check'));
+  env.diskBuild.id = 'f'.repeat(64);
+  assert.equal((await env.send({ type: 'update:check' })).value.managedByChrome, true);
+  await env.lifecycle.alarm({ name: 'macro-studio-build-check' });
+  assert.ok(!env.calls.some(call => call[0] === 'reload'));
+});
+test('store update notifications retain only a version and never force an active extension to reload', async () => {
+  const env = await worker({ storeBuild: true });
+  env.state.macroStudioRecording = { status: 'recording', steps: [{ type: 'click' }] };
+  env.lifecycle.updateAvailable({ version: '1.4.0', unexpected: 'not-stored' });
+  assert.deepEqual(env.local[AVAILABLE_UPDATE_KEY], { version: '1.4.0' });
+  assert.equal(env.calls.some(call => call[0] === 'reload'), false);
+  env.lifecycle.updateAvailable({ version: '<invalid>' });
+  assert.deepEqual(env.local[AVAILABLE_UPDATE_KEY], { version: '1.4.0' });
+  assert.equal((await env.send({ type: 'update:reload' }, env.content)).ok, false);
+  await env.lifecycle.installed();
+  assert.equal(env.local[AVAILABLE_UPDATE_KEY], undefined);
+});
 test('applying an extension update resumes its setup page even when Chrome closes extension tabs', async () => {
   for (const kind of ['closed', 'setup', 'other']) {
     const env = await worker({ local: { macroStudioResumeScriptsTab: 42 } });
@@ -301,6 +330,7 @@ test('reset preview is read-only and only an explicit own reset-page confirmatio
     local: { [SITES_KEY]: { 'https://example.test': true }, [LIBRARY_KEY]: { archived: ['weekly-task'], deleted: [] }, macroStudioLocalScripts: { error: 'old' }, unrelated: 'keep' } });
   await env.send({ type: 'recording:start', tabId: 42 });
   env.state.macroStudioRecording.steps.push({ value: 'private recording' });
+  env.state.macroStudioStudioDraft = { goal: 'private draft' };
   env.memory.folder = { name: 'local', queryPermission: async () => 'granted' };
   env.memory.snapshot = { scripts: [], entries: [], revision: 'old' };
   const resetPage = { ...env.ui, url: 'chrome-extension://studio/ui/reset.html' };
@@ -314,6 +344,7 @@ test('reset preview is read-only and only an explicit own reset-page confirmatio
   assert.equal((await env.send({ type: 'reset:confirm' }, resetPage)).ok, false);
   assert.equal((await env.send({ type: 'reset:confirm', confirmed: true }, resetPage)).ok, true);
   assert.equal(env.state.macroStudioRecording, undefined);
+  assert.equal(env.state.macroStudioStudioDraft, undefined);
   assert.deepEqual(env.memory, {});
   assert.equal(env.local[SITES_KEY], undefined);
   assert.deepEqual(JSON.parse(JSON.stringify(env.local[LIBRARY_KEY])), { archived: [], deleted: ['weekly-task', 'other-task'] });
@@ -372,4 +403,32 @@ test('a permitted child-frame run uses the top-level site opt-in, not a separate
   assert.doesNotMatch(response.error, /ON/);
   env.local[SITES_KEY] = {};
   assert.match((await env.send({ type: 'local:run' }, { ...env.content, frameId: 7, url: 'https://child.test/form' })).error, /ON/);
+});
+
+test('build changes defer only during active work, then reload without deleting stopped recordings or drafts', async () => {
+  const env = await worker();
+  await env.lifecycle.installed();
+  env.state.macroStudioRecording = { id: 'saved', status: 'recording', steps: [{ value: 'keep' }] };
+  env.state.macroStudioStudioDraft = { goal: 'keep my description', variables: 'date' };
+  env.diskBuild.id = '1'.repeat(64);
+  assert.equal((await env.send({ type: 'update:check' }, env.content)).ok, false, 'Pages cannot trigger extension updates');
+  assert.equal((await env.send({ type: 'update:check' })).value.pending, true);
+  assert.equal(env.calls.some(call => call[0] === 'reload'), false);
+  env.state.macroStudioRecording.status = 'stopped';
+  let busy = true;
+  env.chrome.scripting.executeScript = async options => options.func ? [{ result: { busy } }] : [];
+  assert.equal((await env.send({ type: 'update:check' })).value.pending, true, 'Bundled launcher jobs also defer the reload');
+  busy = false;
+  assert.equal((await env.send({ type: 'update:check' })).value.applying, true);
+  assert.equal(env.calls.filter(call => call[0] === 'reload').length, 1);
+  assert.equal(env.state.macroStudioRecording.steps[0].value, 'keep');
+  assert.equal(env.state.macroStudioStudioDraft.goal, 'keep my description');
+  assert.equal(env.memory.updateSession.macroStudioRecording.steps[0].value, 'keep');
+  const restored = await worker({ local: env.local, stored: env.memory });
+  assert.equal((await restored.send({ type: 'studio:state' })).value.steps[0].value, 'keep');
+  assert.equal(restored.state.macroStudioStudioDraft.goal, 'keep my description');
+  assert.equal(restored.memory.updateSession, undefined, 'The temporary checkpoint is removed after restoring into the cleared session');
+  assert.equal(env.local[LOADED_BUILD_KEY], '0'.repeat(64));
+  assert.ok(env.calls.some(call => call[0] === 'extension-message' && call[1].type === 'update:prepare'));
+  assert.match((await env.send({ type: 'recording:start', tabId: 42 })).error, /업데이트/);
 });

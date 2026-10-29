@@ -216,12 +216,19 @@ test('runs validate site and revision, refuse archived scripts and defer changed
   await assert.rejects(env.runtime.run(message, env.sender), /사용할 수 없/);
   env.local[LIBRARY_KEY] = { archived: [], deleted: [] };
   const running = env.runtime.run(message, env.sender); await tick();
+  assert.equal(await env.runtime.whenIdle(() => assert.fail('Running scripts must defer the extension update')), false);
   await assert.rejects(env.runtime.run(message, env.sender), /이미 실행/);
   env.folder.entries.task.entries['script.js'].content = source('task', '작업 후 반영');
   assert.equal((await env.runtime.sync()).revision, env.memory.snapshot.revision);
   assert.equal(env.memory.snapshot.entries[0].revision, entry.revision);
   vm.runInContext('window.release()', env.user.ctx);
   assert.equal(await running, '2026-10-24');
+  const beforeReload = env.memory.snapshot;
+  assert.equal(await env.runtime.whenIdle(async () => {
+    await assert.rejects(env.runtime.connect(env.sender), /초기화/);
+    return true;
+  }), true);
+  assert.equal(env.memory.snapshot, beforeReload, 'Preparing a reload must not clear imported source or registration');
   await env.runtime.sync(); assert.notEqual(env.memory.snapshot.entries[0].revision, entry.revision);
 });
 

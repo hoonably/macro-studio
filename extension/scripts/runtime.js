@@ -196,5 +196,25 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
       return await cleanup();
     } finally { resetting = false; }
   }
-  return { catalog, snapshot, status, sync, connect, run, reconcile, reset };
+  async function whenIdle(action) {
+    if (resetting || jobs.size) return false;
+    resetting = true; epoch++;
+    try {
+      await Promise.allSettled([syncing, ...connections].filter(Boolean));
+      return await action();
+    } finally { resetting = false; }
+  }
+  async function preserveSession() {
+    const values = await chrome.storage.session.get(['macroStudioRecording', 'macroStudioStudioDraft']);
+    await write({ updateSession: values });
+  }
+  async function restoreSession() {
+    const values = await read('updateSession');
+    if (!values || typeof values !== 'object') return;
+    // Chrome clears storage.session on extension reload. Keep this temporary
+    // checkpoint in our private IndexedDB, then remove it immediately on restore.
+    if (Object.keys(values).length) await chrome.storage.session.set(values);
+    await write({ updateSession: undefined });
+  }
+  return { catalog, snapshot, status, sync, connect, run, reconcile, reset, whenIdle, preserveSession, restoreSession };
 }

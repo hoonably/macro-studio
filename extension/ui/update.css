@@ -1,0 +1,24 @@
+.update-notice{margin:0;padding:10px 20px;background:#edf5ef;border-bottom:1px solid #d8e6dc;color:#256b54;font-size:12px;line-height:1.65}
+.update-notice[hidden]{display:none}
+footer{flex-wrap:wrap;gap:10px}
+.update-entry{border:0;background:none;padding:0;color:#62748a;font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+.update-entry:hover{text-decoration:underline}
+.update-dialog{box-sizing:border-box;width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;border:1px solid #dfe5e9;border-radius:14px;padding:24px;background:#fff;color:#24344c;font:14px/1.65 system-ui,-apple-system,sans-serif;box-shadow:0 24px 80px #182b3c26}
+.update-dialog::backdrop{background:#172d3b59;backdrop-filter:blur(3px)}
+.update-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}
+.update-heading h2{font-size:18px;letter-spacing:-.4px;margin:0}
+.update-close{padding:5px 8px;border:0;background:#f2f5f7;color:#5f7081;font:inherit;font-size:12px;border-radius:7px;cursor:pointer}
+.update-identity{margin:22px 0 12px;font-size:15px;font-weight:650}
+.update-channel{display:block;margin-top:5px;color:#718093;font-size:11px;font-weight:400}
+.update-description{margin:0 0 20px;color:#65758b;font-size:12px;line-height:1.8}
+.update-preference{display:flex;align-items:center;gap:10px;border-top:1px solid #e7ecef;padding-top:18px;margin:0;color:#34495f;font-size:12px}
+.update-preference input{display:block;width:16px;height:16px;flex:none;padding:0;margin:0;accent-color:#145fc0}
+.update-result{min-height:48px;margin:18px 0;color:#64788c;font-size:12px;overflow-wrap:anywhere}
+.update-result[data-error=true]{color:#b42318}
+.update-actions{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.update-check{background:#145fc0;color:white;font:inherit;font-size:12px;font-weight:600;border:1px solid transparent;border-radius:9px;padding:10px 14px;cursor:pointer}
+.update-check:disabled{opacity:.5;cursor:default}
+.update-actions a{color:#536b83;font-size:11px;text-decoration:none}
+.update-actions a:hover{text-decoration:underline}
+.update-dialog :is(button,input,a):focus-visible,.update-entry:focus-visible{outline:2px solid #4e86c9;outline-offset:4px}
+@media(max-width:380px){.update-dialog{padding:20px}.update-actions{align-items:stretch;flex-direction:column;gap:12px}}

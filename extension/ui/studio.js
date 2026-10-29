@@ -1,21 +1,37 @@
 import { agentPrompt, exportRecording, MAX_STEPS } from '../recorder/model.js';
 import { sitePattern } from '../recorder/frames.js';
+import { STORE_BUILD } from '../core/distribution.js';
 const $ = selector => document.querySelector(selector);
+const DRAFT_KEY = 'macroStudioStudioDraft';
+let draftWrites = Promise.resolve(), restoringDraft = true;
+const updateLocked = [];
+function saveDraft() {
+  if (restoringDraft) return draftWrites;
+  const draft = Object.fromEntries(['name', 'goal', 'variables'].map(id => [id, $('#' + id).value]));
+  draftWrites = draftWrites.catch(() => {}).then(() => chrome.storage.session.set({ [DRAFT_KEY]: draft }));
+  return draftWrites;
+}
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (sender.id !== chrome.runtime.id) return;
+  if (message.type === 'studio:reset') {
+    restoringDraft = true;
+    draftWrites.catch(() => {}).then(() => {
+      $('#name').value = '나의 자동화'; $('#goal').value = $('#variables').value = '';
+      updatePreview(); restoringDraft = false; respond({ saved: true });
+    });
+    return true;
+  }
+  if (message.type === 'update:prepare') {
+    for (const id of ['name', 'goal', 'variables']) if (!$('#' + id).disabled) {
+      $('#' + id).disabled = true; updateLocked.push($('#' + id));
+    }
+    saveDraft().then(() => respond({ saved: true }), () => respond({ saved: false }));
+    return true;
+  }
+  if (message.type === 'update:cancel') while (updateLocked.length) updateLocked.pop().disabled = false;
+});
 let recording = null, active = null;
 let frameInfo = null, frameSignature = '', frameRequest = 0, framePending = false, permissionBusy = false;
-let localPending = false;
-async function refreshLocal() {
-  if (localPending) return;
-  localPending = true;
-  try {
-    let value = await request('local:status');
-    if (value.connected && value.readable && value.enabled) value = await request('local:sync');
-    const text = value.error || (value.connected ? value.folderName + ' · ' + value.count + '개 · ' + (!value.readable ? '폴더 읽기 허용 필요' : !value.enabled ? '사용자 스크립트 허용 필요' : '자동 동기화 중') : value.count ? '자동 동기화 중지 · ' + value.count + '개 유지' : '스크립트 폴더를 한 번 연결하면 새 작업이 자동으로 반영됩니다.');
-    if ($('#local-status').textContent !== text) $('#local-status').textContent = text;
-  } catch (error) { $('#local-status').textContent = error.message; }
-  finally { localPending = false; }
-}
-$('#manage-scripts').addEventListener('click', () => request('local:open').catch(error => status(error.message, true)));
 const selectedFrames = new Set();
 const targetTabId = () => recording?.status === 'recording' ? recording.tabId : active?.id;
 const status = (message, error = false) => { $('#status').textContent = message; $('#status').dataset.error = error; };
@@ -98,7 +114,7 @@ async function refreshFrames(force = false) {
 }
 const payload = () => ({ ...recording, name: $('#name').value || recording.name });
 function updatePreview() {
-  $('#preview').value = recording ? agentPrompt(payload(), { goal: $('#goal').value, variables: $('#variables').value }) : '';
+  $('#preview').value = recording ? agentPrompt(payload(), { goal: $('#goal').value, variables: $('#variables').value, standalone: STORE_BUILD }) : '';
 }
 function render(state) {
   recording = state;
@@ -180,7 +196,7 @@ $('#stop').addEventListener('click', async () => {
 });
 $('#prompt').addEventListener('click', async () => {
   updatePreview();
-  try { await navigator.clipboard.writeText($('#preview').value); status('복사했습니다. 저장소를 연 Codex 또는 Claude Code에 붙여 넣으세요.'); }
+  try { await navigator.clipboard.writeText($('#preview').value); status(STORE_BUILD ? '복사했습니다. 개인 스크립트를 저장할 폴더를 연 코딩 에이전트에 붙여 넣으세요.' : '복사했습니다. 저장소를 연 Codex 또는 Claude Code에 붙여 넣으세요.'); }
   catch { $('#preview').focus(); $('#preview').select(); status('미리보기에서 직접 복사하세요.'); }
 });
 $('#download').addEventListener('click', () => {
@@ -190,14 +206,16 @@ $('#download').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 $('#clear').addEventListener('click', async () => { try { render(await request('recording:clear')); status('현재 기록을 지웠습니다.'); } catch (error) { status(error.message, true); } });
-for (const selector of ['#name', '#goal', '#variables']) $(selector).addEventListener('input', updatePreview);
+for (const selector of ['#name', '#goal', '#variables']) $(selector).addEventListener('input', () => {
+  updatePreview(); saveDraft().catch(error => status(error.message, true));
+});
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'session' && changes.macroStudioRecording) render(changes.macroStudioRecording.newValue || null); });
 chrome.tabs.onActivated.addListener(() => refreshTab().then(() => refreshFrames(true)).catch(() => {}));
 chrome.tabs.onUpdated.addListener((tabId, change) => { if (tabId === active?.id && (change.url || change.status === 'complete')) refreshTab().then(() => refreshFrames(true)).catch(() => {}); });
 chrome.permissions.onAdded.addListener(() => refreshFrames(true));
 chrome.permissions.onRemoved.addListener(() => refreshFrames(true));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') refreshFrames(true); });
-setInterval(() => { if (document.visibilityState !== 'hidden' && !permissionBusy) { refreshFrames(); refreshLocal(); } }, 1500);
+setInterval(() => { if (document.visibilityState !== 'hidden' && !permissionBusy) refreshFrames(); }, 1500);
 await refreshTab();
 try {
   const initial = await request('studio:state');
@@ -205,4 +223,9 @@ try {
   render(initial);
 } catch (error) { status(error.message, true); }
 await refreshFrames(true);
-await refreshLocal();
+try {
+  const draft = (await chrome.storage.session.get(DRAFT_KEY))[DRAFT_KEY];
+  for (const id of ['name', 'goal', 'variables']) if (typeof draft?.[id] === 'string') $('#' + id).value = draft[id];
+  updatePreview();
+} catch { /* Recording data remains available even if draft storage is unavailable. */ }
+restoringDraft = false;

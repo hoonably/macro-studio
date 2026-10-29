@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const readJSON = async file => JSON.parse(await fs.readFile(file, 'utf8'));
@@ -24,9 +25,26 @@ async function folders(directory) {
     throw error;
   })).filter(entry => entry.isDirectory() && sourceOnly(entry.name)).map(entry => entry.name).sort();
 }
+async function fingerprint(directory, prefix = '') {
+  const hash = createHash('sha256');
+  async function add(folder, relative) {
+    for (const entry of (await fs.readdir(folder, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+      const name = relative + entry.name, file = path.join(folder, entry.name);
+      if (entry.isDirectory()) await add(file, name + '/');
+      else if (entry.isFile()) {
+        const bytes = await fs.readFile(file);
+        hash.update(JSON.stringify([name, bytes.length]) + '\n'); hash.update(bytes);
+      }
+    }
+  }
+  await add(directory, prefix);
+  return hash.digest('hex');
+}
 
-export async function build({ root = projectRoot, publicOnly = false } = {}) {
+export async function build({ root = projectRoot, publicOnly = false, storeOnly = false } = {}) {
+  if (storeOnly) publicOnly = true;
   const manifest = await readJSON(path.join(root, 'extension/manifest.base.json'));
+  if (storeOnly) manifest.minimum_chrome_version = '138';
   // Examples are reference source, never preinstalled scripts or site permissions.
   const content = [], catalog = [];
   const localScripts = [];
@@ -69,12 +87,25 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
   const bridgeFiles = ['core/namespace.js', 'ui/launcher.js', 'core/studio-entry.js', 'recorder/capture.js'];
   if (origins.length) manifest.content_scripts = [...content, { matches: origins, js: bridgeFiles,
     world: 'ISOLATED', all_frames: true, run_at: 'document_idle' }];
-  const output = path.join(root, publicOnly ? 'dist-public' : 'dist');
+  const output = path.join(root, storeOnly ? 'dist-store' : publicOnly ? 'dist-public' : 'dist');
   const staging = output + '.building';
   await fs.rm(staging, { force: true, recursive: true });
   try {
     await fs.cp(path.join(root, 'extension'), staging, { recursive: true, filter: sourceOnly });
     await fs.rm(path.join(staging, 'manifest.base.json'));
+    if (storeOnly) {
+      await fs.writeFile(path.join(staging, 'core/distribution.js'), 'export const STORE_BUILD = true;\n');
+      for (const page of ['studio', 'scripts']) {
+        const file = path.join(staging, 'ui', page + '.html');
+        let html = await fs.readFile(file, 'utf8');
+        html = html.replace(/Git으로 설치했다면 <strong>macro-studio 폴더 자체를 선택하세요\.<\/strong> (?:내부의|그 안의) <code>local\/scripts<\/code>를 자동으로 찾아 연결합니다\./, '원하는 위치에 <strong>scripts 폴더를 만들고 선택하세요.</strong> 에이전트가 만든 개인 스크립트를 이 폴더에 저장하면 자동 반영됩니다.');
+        html = html.replace(/저장소 바로 아래의 <code>scripts<\/code>는 개발용 예제 폴더입니다\. 개인 스크립트는 <code>local\/scripts<\/code>에 저장하세요\./, '처음에는 폴더 연결 없이 작업을 기록해도 됩니다. 개인 스크립트를 실행할 때 폴더를 연결하세요. Git·npm 설치는 필요하지 않습니다.');
+        html = html.replace('Codex 또는 Claude Code에서 이 저장소를 열고 프롬프트를 붙여 넣으세요.', '개인 스크립트를 저장할 폴더를 코딩 에이전트에서 열고 프롬프트를 붙여 넣으세요.');
+        html = html.replace('<button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button>', '<button id="reload-extension" class="text-button" hidden>확장 다시 시작</button>');
+        html = html.replace('스크립트와 확장 업데이트를 자동으로 반영합니다.', '개인 스크립트 파일을 자동으로 반영합니다.');
+        await fs.writeFile(file, html);
+      }
+    }
     for (const file of localScripts) {
       const target = path.join(staging, file.target);
       await fs.mkdir(path.dirname(target), { recursive: true });
@@ -92,6 +123,16 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
       'ui/library.html', 'ui/library.js', 'ui/library.css', 'ui/scripts.html', 'ui/scripts.js', 'scripts/runtime.js', ...Object.values(manifest.icons)]) {
       if (!await exists(path.join(staging, file))) throw new Error('확장 파일이 없습니다: ' + file);
     }
+    const id = await fingerprint(staging);
+    const workerFile = path.join(staging, 'background.js');
+    await fs.writeFile(workerFile, (await fs.readFile(workerFile, 'utf8')).replace('__MACRO_STUDIO_BUILD_ID__', id));
+    await fs.writeFile(path.join(staging, 'core/build-info.json'), JSON.stringify({ id }) + '\n');
+    // Identical builds keep the same marker and do not cause a reload loop.
+    const previous = await readJSON(path.join(output, 'core/build-info.json')).catch(() => null);
+    if (previous?.id === id) {
+      await fs.rm(staging, { recursive: true });
+      return { output, manifest, personal: catalog.length > 0, scripts: catalog.length };
+    }
     await fs.rm(output, { recursive: true, force: true });
     await fs.rename(staging, output);
   } catch (error) {
@@ -101,6 +142,6 @@ export async function build({ root = projectRoot, publicOnly = false } = {}) {
   return { output, manifest, personal: catalog.length > 0, scripts: catalog.length };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const result = await build({ publicOnly: process.argv.includes('--public') });
+  const result = await build({ publicOnly: process.argv.includes('--public'), storeOnly: process.argv.includes('--store') });
   console.log('Built ' + result.output + (result.personal ? ' (개인 스크립트 포함 · 공유 금지)' : ' (스크립트 없는 기본 설치)'));
 }

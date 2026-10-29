@@ -5,9 +5,28 @@
   <title>Macro Studio</title><link rel="stylesheet" href="studio.css">
 </head>
 <body>
-  <header class="brand studio-brand"><img src="../assets/icon-48.png" width="36" height="36" alt=""><div><strong>Macro Studio</strong><p>작업을 보여주면, 나만의 매크로가 됩니다.</p></div><nav class="help-links" aria-label="사용 안내"><a href="https://github.com/hoonably/macro-studio/blob/main/docs/getting-started.md" target="_blank" rel="noreferrer">설치·사용법</a><a href="https://github.com/hoonably/macro-studio/blob/main/docs/create-script.md" target="_blank" rel="noreferrer">개인 스크립트 만들기</a></nav></header>
+  <header class="brand studio-brand"><img src="../assets/icon-48.png" width="36" height="36" alt=""><div><strong>Macro Studio</strong><p>작업을 보여주면, 나만의 매크로가 됩니다.</p></div></header>
   <main>
-    <section class="scripts-connection"><h2>스크립트 연결</h2><p id="local-status" class="hint" role="status">폴더를 한 번 선택하면 저장한 스크립트가 자동으로 반영됩니다.</p><button id="manage-scripts" class="secondary">스크립트 연결 ↗</button></section>
+    <section class="scripts-connection">
+      <h2>스크립트 연결</h2>
+      <details class="setup-overview"><summary>사용 준비 · 권한 확인</summary><p class="hint">폴더와 사이트는 직접 선택한 범위만 허용합니다. 기록은 폴더 연결 없이 시작할 수 있습니다.</p><ol id="setup-checklist" class="setup-checklist" aria-label="사용 준비 상태"></ol></details>
+      <p class="folder-guide">Git으로 설치했다면 <strong>macro-studio 폴더 자체를 선택하세요.</strong> 내부의 <code>local/scripts</code>를 자동으로 찾아 연결합니다.</p>
+      <p id="script-state" class="sync-status" role="status" aria-live="polite">설정을 확인하는 중…</p>
+      <div class="actions script-actions"><button id="connect-folder" disabled>스크립트 폴더 연결</button><button id="grant-folder" class="secondary" hidden>폴더 읽기 다시 허용</button></div>
+      <p class="hint">저장소 바로 아래의 <code>scripts</code>는 개발용 예제 폴더입니다. 개인 스크립트는 <code>local/scripts</code>에 저장하세요.</p>
+      <div id="script-permission-setup" class="permission-setup" hidden><strong>폴더 연결 완료 · 실행 허용만 한 번 켜주세요</strong><p class="hint">Chrome 확장 세부정보에서 ‘사용자 스크립트 허용’을 켠 뒤 돌아오세요.</p><button id="script-settings" class="secondary">Chrome 실행 허용 설정 열기</button><button id="apply-script-settings" class="secondary">허용 설정 반영하고 계속</button></div>
+      <div id="script-origins-section" hidden><h3>새 스크립트가 사용할 사이트</h3><p class="hint">사용할 주소만 선택해 한 번 허용하세요.</p><ul id="script-origins" class="frame-sites"></ul><button id="grant-script-origins" disabled>선택한 사이트 허용</button></div>
+      <ul id="sync-errors" class="sync-errors"></ul>
+      <details class="connection-details"><summary>연결 상태·관리</summary>
+        <p class="hint">한 번 연결하면 파일을 저장할 때 자동 반영됩니다. 별도로 받은 개인 스크립트 폴더도 연결할 수 있습니다. 원본 파일은 수정하지 않습니다.</p>
+        <div class="section-heading"><h3>연결한 스크립트</h3><span id="synced-count" class="pill">0개</span></div>
+        <ul id="synced-scripts" class="synced-scripts"></ul><p id="synced-empty" class="empty">아직 스크립트가 없습니다. 작업을 기록해 에이전트와 만든 스크립트를 연결한 폴더에 저장하세요.</p>
+        <p id="sync-detail" class="hint"></p>
+        <div class="actions script-actions"><button id="sync-folder" class="secondary">다시 확인</button><button id="disconnect-folder" class="text-button" hidden>동기화 중지</button></div>
+        <p class="hint">동기화를 중지해도 마지막으로 가져온 스크립트는 유지됩니다. 실행은 사이트의 파란 버튼에서 직접 시작하세요.</p>
+        <button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button>
+      </details>
+    </section>
     <section>
       <h2>1. 작업 기록</h2>
       <p id="site" class="site">현재 탭을 확인하는 중…</p>
@@ -25,13 +44,16 @@
     </section>
     <section>
       <h2>3. 에이전트와 만들기</h2>
-      <label>무엇을 자동화할까요?<textarea id="goal" rows="3" placeholder="자동화할 작업 순서와 완료할 지점을 적어주세요."></textarea></label>
-      <label>바뀌는 값<input id="variables" placeholder="실행할 때마다 바꿀 값을 적어주세요."></label>
+      <label>무엇을 자동화할까요?<textarea id="goal" rows="4" placeholder="자동화할 작업 순서와 완료할 지점을 적어주세요.&#10;(예: 일반행정 → 국내출장 신청 → 신청 → 값들 입력 → 신규 결재상신 → 확인 → 결재선 목록 선택)"></textarea></label>
+      <label>바뀌는 값<textarea id="variables" rows="2" placeholder="실행할 때마다 바꿀 값을 적어주세요.&#10;(예: 출장일, 출장 시간)"></textarea></label>
       <div class="prompt-preview"><label for="preview">전달할 내용 보기</label><textarea id="preview" rows="10" readonly aria-label="에이전트에게 전달할 내용"></textarea></div>
       <div class="actions"><button id="prompt" disabled>에이전트용 프롬프트 복사</button><button id="download" class="secondary" disabled>JSON 저장</button></div>
       <p class="hint">Codex 또는 Claude Code에서 이 저장소를 열고 프롬프트를 붙여 넣으세요. 현재 버전은 외부 AI 서비스에 자동으로 전송하지 않습니다.</p>
       <button id="clear" class="text-button" disabled>현재 기록 지우기</button>
     </section>
+    <footer><a href="privacy.html" target="_blank" rel="noopener noreferrer">데이터와 권한</a></footer>
   </main>
+  <script type="module" src="scripts.js"></script>
   <script type="module" src="studio.js"></script>
+  <script type="module" src="update.js"></script>
 </body></html>

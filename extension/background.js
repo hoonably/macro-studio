@@ -4,6 +4,9 @@ import { inspectFrames, sitePattern } from './recorder/frames.js';
 import { createScriptRuntime } from './scripts/runtime.js';
 import { SITES_KEY, siteOrigin, siteSettings, siteEnabled } from './core/site-settings.js';
 import { optionalResetPermissions } from './core/reset.js';
+import { createBuildUpdater } from './core/build-updates.js';
+import { STORE_BUILD } from './core/distribution.js';
+import { UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, availableVersion } from './core/update-notices.js';
 
 const KEY = 'macroStudioRecording';
 const CAPTURE_FILES = ['core/namespace.js', 'ui/launcher.js', 'core/studio-entry.js', 'recorder/capture.js'];
@@ -24,6 +27,67 @@ async function requireSiteOn(origin) {
   if (!siteEnabled(await readSites(), origin)) throw new Error('도구모음의 Macro Studio에서 이 사이트에 적용을 ON으로 켜주세요.');
 }
 const localScripts = createScriptRuntime(chrome, { changed: refreshOpenTabs });
+const sessionReady = localScripts.restoreSession();
+let applyingUpdate = false;
+const buildUpdates = createBuildUpdater(chrome, {
+  loadedBuild: '__MACRO_STUDIO_BUILD_ID__',
+  fetchBuild: async () => {
+    const response = await fetch(chrome.runtime.getURL('core/build-info.json'), { cache: 'no-store' });
+    if (!response.ok) throw new Error('빌드 중입니다.');
+    return response.json();
+  },
+  apply: applyBuildUpdate
+});
+async function prepareLaunchers(lock) {
+  const { origins = [] } = await chrome.permissions.getAll();
+  const tabs = (await chrome.tabs.query({})).filter(tab => origins.some(pattern => matchesSite(pattern, tab.url)));
+  const results = await Promise.all(tabs.map(async tab => {
+    try {
+      return await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, world: 'ISOLATED',
+        func: shouldLock => {
+          const host = document.getElementById('macro-studio-launcher');
+          if (!host) return { busy: false };
+          const busy = host.getAttribute('aria-busy') === 'true';
+          if (shouldLock && !busy) host.dispatchEvent(new CustomEvent('macro-studio:library-state', {
+            detail: JSON.stringify({ ready: false, archived: [], deleted: [] })
+          }));
+          return { busy };
+        }, args: [lock] });
+    } catch { return []; } // Closed/restricted documents have no reachable launcher.
+  }));
+  return !results.flat().some(item => item?.result?.busy);
+}
+async function applyBuildUpdate(confirm = async () => true) {
+  if (applyingUpdate || (await read())?.status === 'recording') return false;
+  return localScripts.whenIdle(async () => {
+    applyingUpdate = true;
+    let reload = false;
+    try {
+      if (!await prepareLaunchers(false) || !await prepareLaunchers(true)) return false;
+      // Extension pages flush drafts before their context is replaced.
+      const prepared = await chrome.runtime.sendMessage({ type: 'update:prepare' }).catch(() => null);
+      if (prepared?.saved === false) return false;
+      if (!await confirm()) return false;
+      const pages = (await chrome.tabs.query({})).flatMap(tab => {
+        if (!tab.url?.startsWith(chrome.runtime.getURL('ui/'))) return [];
+        const path = new URL(tab.url).pathname;
+        return ['/ui/studio.html', '/ui/scripts.html', '/ui/library.html'].includes(path) ? [{ id: tab.id, path }] : [];
+      });
+      await chrome.storage.local.set({ macroStudioResumeUpdatePages: pages });
+      await localScripts.preserveSession();
+      reload = true;
+      // Reply to the check request before Chrome replaces this worker.
+      setTimeout(() => chrome.runtime.reload(), 0);
+      return true;
+    } finally {
+      if (!reload) {
+        applyingUpdate = false;
+        await refreshOpenTabs();
+        await chrome.runtime.sendMessage({ type: 'update:cancel' }).catch(() => {});
+      }
+    }
+  });
+}
 async function refreshOpenTabs() {
   const { origins = [] } = await chrome.permissions.getAll();
   const framesEnabled = await chrome.permissions.contains({ permissions: ['webNavigation'] });
@@ -152,6 +216,12 @@ async function start(message) {
   return state;
 }
 async function handle(message, sender) {
+  // Keep sidePanel.open in the original click gesture; other requests wait for
+  // the recording/draft checkpoint to be restored after a reload.
+  if (message.type !== 'studio:open') await sessionReady;
+  if (applyingUpdate && ['recording:start', 'studio:activate', 'local:run', 'local:connect'].includes(message.type)) {
+    throw new Error('업데이트를 적용하는 중입니다. 잠시 후 다시 실행하세요.');
+  }
   if (['scripts:state', 'scripts:archive', 'scripts:restore', 'scripts:delete'].includes(message.type)) return scripts(message, sender);
   if (message.type === 'local:connect' && sender.id === chrome.runtime.id && sender.tab) {
     try { return await localScripts.connect(sender) || {}; }
@@ -201,6 +271,8 @@ async function handle(message, sender) {
   }
   if (!controlPage(sender)) throw new Error('확장 프로그램 화면에서 실행하세요.');
   switch (message.type) {
+    case 'update:check': return STORE_BUILD ? { pending: false, managedByChrome: true } : buildUpdates.check();
+    case 'update:reload': return { applying: await applyBuildUpdate() };
     case 'reset:state': {
       const [recording, status, sites, library] = await Promise.all([read(), localScripts.status(), readSites(),
         scripts({ type: 'scripts:state' }, sender)]);
@@ -215,8 +287,9 @@ async function handle(message, sender) {
           state.status = 'stopped'; await write(state);
           await chrome.tabs.sendMessage(state.tabId, { type: 'capture:state', recordingId: null }).catch(() => {});
         }
-        await chrome.storage.session.remove(KEY);
-        await chrome.storage.local.remove([LIBRARY_KEY, SITES_KEY, 'macroStudioResumeScriptsTab']);
+        await chrome.runtime.sendMessage({ type: 'studio:reset' }).catch(() => {});
+        await chrome.storage.session.remove([KEY, 'macroStudioStudioDraft']);
+        await chrome.storage.local.remove([LIBRARY_KEY, SITES_KEY, UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, 'macroStudioResumeScriptsTab', 'macroStudioResumeUpdatePages']);
         // Clearing imported data must not revive scripts still bundled in an older build.
         const deleted = (await catalog()).map(script => script.id);
         if (deleted.length) await chrome.storage.local.set({ [LIBRARY_KEY]: { archived: [], deleted } });
@@ -279,11 +352,26 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   operation.then(value => respond({ ok: true, value }), error => respond({ ok: false, error: error.message }));
   return true;
 });
-const configure = async () => {
+const configure = async (installed = false) => {
+  await sessionReady;
+  if (installed && !STORE_BUILD) await buildUpdates.installed();
+  if (installed) await chrome.storage.local.remove(AVAILABLE_UPDATE_KEY);
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
   await registerCapture();
   await chrome.alarms.create('macro-studio-script-sync', { periodInMinutes: 0.5 });
+  if (STORE_BUILD) await chrome.alarms.clear('macro-studio-build-check');
+  else await chrome.alarms.create('macro-studio-build-check', { periodInMinutes: 0.5 });
   await localScripts.sync(await catalog());
+  await refreshOpenTabs();
+  const { macroStudioResumeUpdatePages: pages = [] } = await chrome.storage.local.get('macroStudioResumeUpdatePages');
+  await chrome.storage.local.remove('macroStudioResumeUpdatePages');
+  for (const page of pages) {
+    if (!Number.isInteger(page.id) || !['/ui/studio.html', '/ui/scripts.html', '/ui/library.html'].includes(page.path)) continue;
+    const tab = await chrome.tabs.get(page.id).catch(() => null);
+    const url = chrome.runtime.getURL(page.path.slice(1));
+    if (!tab) await chrome.tabs.create({ url });
+    else if (tab.url?.split('?')[0] === url) await chrome.tabs.update(page.id, { url });
+  }
   const { macroStudioResumeScriptsTab: tabId } = await chrome.storage.local.get('macroStudioResumeScriptsTab');
   if (Number.isInteger(tabId)) {
     await chrome.storage.local.remove('macroStudioResumeScriptsTab');
@@ -293,8 +381,13 @@ const configure = async () => {
     else if (tab.url?.startsWith(chrome.runtime.getURL('ui/scripts.html'))) await chrome.tabs.update(tabId, { url });
   }
 };
-chrome.runtime.onInstalled.addListener(() => configure().catch(console.error));
+chrome.runtime.onInstalled.addListener(() => configure(true).catch(console.error));
 chrome.runtime.onStartup.addListener(() => configure().catch(console.error));
+if (STORE_BUILD) chrome.runtime.onUpdateAvailable?.addListener(details => {
+  const version = availableVersion(details);
+  // Chrome owns installation. Do not force a reload while the user is recording or running a macro.
+  if (version) chrome.storage.local.set({ [AVAILABLE_UPDATE_KEY]: { version } }).catch(console.error);
+});
 chrome.permissions.onAdded.addListener(() => serial(async () => { await registerCapture(); await localScripts.sync(await catalog()); await refreshOpenTabs(); }).catch(console.error));
 chrome.permissions.onRemoved.addListener(() => {
   serial(async () => { await registerCapture(); await localScripts.sync(await catalog()); await refreshOpenTabs(); }).catch(console.error);
@@ -316,4 +409,5 @@ chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
 }));
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'macro-studio-script-sync') serial(async () => localScripts.sync(await catalog())).catch(console.error);
+  if (alarm.name === 'macro-studio-build-check' && !STORE_BUILD) serial(() => buildUpdates.check()).catch(console.error);
 });

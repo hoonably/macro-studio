@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { projectRoot } from './build.mjs';
 
-const skip = new Set(['.git', 'node_modules', 'local', 'dist', 'dist-public', 'artifacts']);
+const skip = new Set(['.git', 'node_modules', 'local', 'dist', 'dist-public', 'dist-store', 'artifacts']);
 async function walk(directory) {
   const files = [];
   for (const item of await fs.readdir(directory, { withFileTypes: true })) {

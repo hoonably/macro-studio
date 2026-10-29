@@ -15,3 +15,5 @@ button:focus-visible{outline:3px solid #8bb9ff;outline-offset:3px}
 #status[data-error="true"]{color:#b42318}
 footer{padding:11px 20px;background:#f7f9fc;border-top:1px solid #edf0f5}
 footer button{padding:0;border:0;background:none;color:#61728a;font-size:12px}
+
+footer{display:flex;align-items:center;justify-content:space-between;gap:12px}footer a{font-size:11px;color:#61728a;text-decoration:none}footer a:hover{text-decoration:underline}

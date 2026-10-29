@@ -18,6 +18,9 @@ test('a fresh personal build prepares an empty connectable script folder; public
   await assert.rejects(fs.access(path.join(root, 'dist-public/.gallery')));
   const result = await build({ root });
   for (const built of [shared, result]) {
+    const stamp = JSON.parse(await fs.readFile(path.join(built.output, 'core/build-info.json'), 'utf8'));
+    assert.match(stamp.id, /^[a-f0-9]{64}$/);
+    assert.ok((await fs.readFile(path.join(built.output, 'background.js'), 'utf8')).includes(stamp.id));
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(built.output, 'core/script-catalog.json'), 'utf8')), []);
     assert.deepEqual(built.manifest.host_permissions, []);
     assert.equal(built.manifest.content_scripts, undefined, 'No scripts or empty match registrations on a fresh install');
@@ -32,6 +35,12 @@ test('a fresh personal build prepares an empty connectable script folder; public
     async *values() { for (const name of await fs.readdir(file)) yield directory(path.join(file, name)); }
   });
   assert.deepEqual(await readScripts(await scriptsDirectory(directory(root))), { scripts: [], errors: [] });
+  const firstBuild = await fs.readFile(path.join(root, 'dist/core/build-info.json'), 'utf8');
+  await build({ root });
+  assert.equal(await fs.readFile(path.join(root, 'dist/core/build-info.json'), 'utf8'), firstBuild, 'Identical builds do not trigger updates');
+  await fs.appendFile(path.join(root, 'extension/ui/studio.html'), '\n<!-- New UI -->');
+  await build({ root });
+  assert.notEqual(await fs.readFile(path.join(root, 'dist/core/build-info.json'), 'utf8'), firstBuild, 'UI-only changes are detected without a version bump');
   await fs.mkdir(path.join(root, 'local/scripts/.gallery'));
   await fs.writeFile(path.join(root, 'local/scripts/.gallery/gallery.csv'), 'PRIVATE_LOCAL_METADATA');
   assert.equal((await build({ root })).scripts, 0, 'Local gallery indexes are not script folders');
@@ -60,6 +69,20 @@ test('builds ignore legacy presets and examples; only explicit personal scripts 
   await fs.access(path.join(personal.output, personal.manifest.action.default_popup));
   const shared = await build({ root, publicOnly: true });
   assert.equal(shared.personal, false);
+  const store = await build({ root, storeOnly: true });
+  assert.equal(store.manifest.minimum_chrome_version, '138');
+  assert.equal(store.personal, false);
+  assert.deepEqual(store.manifest.host_permissions, []);
+  assert.equal(store.manifest.content_scripts, undefined);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(store.output, 'core/script-catalog.json'), 'utf8')), []);
+  await assert.rejects(fs.access(path.join(store.output, 'scripts/local')));
+  assert.match(await fs.readFile(path.join(store.output, 'core/distribution.js'), 'utf8'), /STORE_BUILD = true/);
+  for (const page of ['studio', 'scripts']) {
+    const html = await fs.readFile(path.join(store.output, 'ui', page + '.html'), 'utf8');
+    assert.match(html, /scripts 폴더를 만들고 선택/);
+    assert.doesNotMatch(html, /macro-studio 폴더 자체|local\/scripts|이 저장소를 열고/);
+    assert.match(html, /id="reload-extension"[^>]+hidden/);
+  }
   assert.ok(!(await fs.readFile(path.join(shared.output, 'core/config.js'), 'utf8')).includes('PRIVATE_SENTINEL'));
   assert.equal(shared.manifest.content_scripts, undefined);
   await assert.rejects(fs.access(path.join(shared.output, 'scripts/local')));
