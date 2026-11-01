@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko" class="product-embed">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <base href="../" target="_blank">
+  <title>Macro Studio · 반복하는 웹 작업을 기록하는 Chrome 확장</title>
+  <link rel="stylesheet" href="assets/product-site.css">
+  <link rel="stylesheet" href="assets/cover.css">
+  <script src="assets/product-site.js" defer></script>
+  <script src="assets/cover.js" defer></script>
+  <script src="assets/product-embed.js" defer></script>
+</head>
+<body class="collection-page product-macro-studio ">
+  <main><section class="product-cover macro-cover" aria-labelledby="macro-cover-title">
+  <div class="container">
+    <div class="macro-intro">
+      <h1 id="macro-cover-title">반복하는 웹 작업을<br><em>매크로로 만드세요.</em></h1>
+      <div class="macro-intro__aside">
+        <p>클릭과 입력 순서를 기록해 Codex·Claude Code에 건네세요. 함께 만든 매크로는 쓰던 사이트에서 버튼 하나로 실행해요.</p>
+        <div class="cover-actions"><a class="button cover-download" href="https://chromewebstore.google.com/detail/oobgpakpaoknojmgkolgmmkjemjmimld"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 8h8M8.5 14 5 7m9.5 8-4 6"/></svg>Chrome에 추가</a><a class="button github-link" href="https://github.com/hoonably/macro-studio" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg><span>GitHub</span></a></div>
+        <p class="cover-platform">Chrome 138 이상 · Chrome 웹 스토어 확장</p>
+      </div>
+    </div>
+
+    <section class="macro-demo" data-macro-demo aria-labelledby="macro-demo-title">
+      <div class="macro-demo__heading">
+        <h2 id="macro-demo-title">출장 신청</h2>
+        <p class="macro-demo__note">출장지와 날짜를 고르고 실행해 보세요.</p>
+      </div>
+      <div class="macro-tape">
+        <ol class="macro-tape__steps" aria-label="매크로 실행 순서">
+          <li>
+            <span class="macro-tape__kind"><b>01</b> 열기</span>
+            <span class="macro-tape__value">새 신청서</span>
+          </li>
+          <li>
+            <label class="macro-tape__kind" for="macro-destination"><b>02</b> 출장지</label>
+            <span class="macro-tape__select">
+              <select id="macro-destination" disabled>
+                <option data-purpose="학회 참석">부산</option>
+                <option data-purpose="공동 연구 회의">대전</option>
+                <option data-purpose="워크숍 참석">서울</option>
+              </select>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+            </span>
+          </li>
+          <li>
+            <label class="macro-tape__kind" for="macro-date"><b>03</b> 출장일</label>
+            <span class="macro-tape__value"><input type="date" id="macro-date" required disabled></span>
+          </li>
+        </ol>
+        <button class="macro-tape__run" type="button" data-run hidden>
+          <svg viewBox="0 0 22 22" aria-hidden="true"><path d="m7 4 10 7-10 7z"/></svg><span>매크로 실행</span>
+        </button>
+      </div>
+
+      <section class="trip-sheet" aria-labelledby="trip-sheet-title">
+        <div class="trip-sheet__head">
+          <h3 id="trip-sheet-title">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H5v18h14V8zM14 3v5h5M8 12h8M8 16h6"/></svg>
+            국내 출장 신청서
+          </h3>
+          <p class="trip-sheet__status" role="status" data-status>작성 전</p>
+        </div>
+        <dl class="trip-sheet__fields">
+          <div><dt>출장지</dt><dd data-field="destination">—</dd></div>
+          <div><dt>출장 일정</dt><dd data-field="date">—</dd></div>
+          <div><dt>출장 목적</dt><dd data-field="purpose">—</dd></div>
+        </dl>
+      </section>
+      <noscript><p class="macro-demo__note">신청서 작성을 재생하려면 자바스크립트를 켜 주세요.</p></noscript>
+    </section>
+  </div>
+</section>
+</main>
+  <dialog class="image-dialog" aria-label="앱 화면 크게 보기">
+    <button type="button" aria-label="확대 화면 닫기"><img alt=""></button>
+  </dialog>
+</body>
+</html>

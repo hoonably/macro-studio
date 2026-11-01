@@ -1,57 +1,9 @@
 # Macro Studio
 
-**반복하는 웹 작업을 기록하고, 나만의 매크로로 다시 실행합니다.**
+Chrome에서 반복하는 클릭과 입력을 기록해 Codex나 Claude Code에 건네세요. 함께 만든 매크로는 쓰던 사이트에서 버튼 하나로 다시 실행할 수 있어요.
 
-작업 순서를 직접 보여주고, 검토한 기록을 코딩 에이전트에 전달하세요. 만들어진 스크립트는 사이트의 작은 파란 버튼에서 실행합니다. 매번 실행할 때 AI를 호출하지 않습니다.
+**[출장 신청 매크로 실행해 보기 ↗](https://macro-studio.pages.dev/)**
 
-[Chrome에 추가](https://chromewebstore.google.com/detail/oobgpakpaoknojmgkolgmmkjemjmimld) · [웹사이트](https://macro-studio.pages.dev/) · [소스 코드](https://github.com/hoonably/macro-studio) · [문의](https://github.com/hoonably/macro-studio/issues)
+[![선택한 출장지 대전과 출장일이 국내 출장 신청서에 입력되고 임시저장된 화면](.github/site-preview.webp)](https://macro-studio.pages.dev/)
 
-## 주요 기능
-
-- **작업 기록** — 클릭·입력·화면 이동을 기록하고, 전달할 단계를 직접 검토합니다.
-- **개인 매크로 실행** — 작업과 입력값을 선택하고, 진행 상태를 확인합니다.
-- **폴더 자동 동기화** — 연결한 폴더에 스크립트를 저장하면 목록에 반영합니다.
-- **사이트별 사용** — 직접 켠 사이트에서만 버튼이 나타납니다. 필요한 주소만 허용합니다.
-- **스크립트 보관함** — 자주 쓰지 않는 작업을 보관하고 나중에 복원합니다.
-
-현재는 프롬프트를 Codex·Claude Code에 직접 전달하는 방식입니다. 확장 안에서 AI 채팅을 하거나 기록만으로 실행 코드를 자동 생성하지는 않습니다.
-
-## 설치와 시작
-
-Chrome 138 이상에서 Chrome 웹 스토어로 설치합니다. Git·Node.js·npm 설치는 필요하지 않습니다.
-
-1. [Chrome 웹 스토어](https://chromewebstore.google.com/detail/oobgpakpaoknojmgkolgmmkjemjmimld)에서 **Chrome에 추가**를 누릅니다.
-2. 사용할 사이트에서 도구모음의 **Macro Studio → 이 사이트에 적용**을 켭니다.
-3. 페이지의 **파란 버튼 → 새 자동화 만들기**로 작업실을 열고, 평소 하던 작업을 기록합니다.
-4. 기록한 단계를 검토하고 목적과 바뀌는 값을 적은 뒤 **에이전트용 프롬프트 복사**를 누릅니다.
-5. 코딩 에이전트와 만든 개인 `scripts` 폴더를 연결하고, 실행에 필요한 권한을 허용합니다.
-
-**처음 목록은 비어 있고 모든 사이트는 OFF**입니다. 기록은 폴더 연결 없이 시작할 수 있습니다. 소스를 수정하거나 로컬 빌드를 쓰려면 [개발 안내](docs/DEVELOPMENT.md)를 참고하세요.
-
-[자세한 사용법](docs/getting-started.md) · [개인 스크립트 만들기](docs/create-script.md)
-
-## 권한과 데이터
-
-연결 화면에서 **폴더 읽기 → 스크립트 실행 → 사이트 접근** 상태를 확인할 수 있습니다. Chrome 실행 허용 설정으로 바로 이동하고, 돌아와 상태를 다시 확인할 수 있습니다. 폴더는 읽기만 허용하며, 사이트는 사용할 주소만 직접 선택합니다.
-
-기록과 개인 스크립트는 로컬에 보관합니다. 비밀번호·인증번호 필드는 건너뛰지만 일반 입력에는 개인 정보가 남을 수 있으니 공유 전에 확인하세요. 폴더를 저장하거나 동기화한다고 매크로가 자동 실행되지는 않습니다.
-
-[데이터와 권한](docs/privacy.md) · [폴더 동기화](docs/script-sync.md)
-
-## 업데이트
-
-화면 아래 **버전 · 업데이트**에서 현재 버전, 배포 방식, 새 버전 유무를 확인하고 **새 업데이트를 확장 화면에서 알림**을 설정할 수 있습니다. 알림 설정은 브라우저를 다시 열어도 유지됩니다.
-
-- **웹 스토어판:** Chrome이 자동으로 업데이트합니다. 새 버전 알림과 수동 확인을 제공하며, 알림을 꺼도 Chrome의 자동 설치는 유지됩니다.
-- **로컬 설치:** `git pull` 후 `npm run build`를 실행하면 완료된 빌드를 감지합니다. 기록·매크로 실행 중에는 적용을 미루고, 작성 중인 내용을 보존합니다.
-- **개인 스크립트:** 연결된 폴더에 저장하면 자동 반영되므로 확장 새로고침이 필요하지 않습니다.
-
-이전 버전에서 로컬 빌드 감지 기능을 처음 받는 경우에만 확장을 한 번 새로고침하세요.
-
-## 개발과 배포
-
-개발 환경·검사는 [개발 안내](docs/DEVELOPMENT.md), 배포 파일과 릴리스 문구는 [배포 안내](docs/RELEASING.md)를 참고하세요.
-
-[구조](docs/architecture.md) · [문제 해결](docs/troubleshooting.md) · [기여](CONTRIBUTING.md) · [MIT License](LICENSE)
-
-개발: [Jeonghoon Park](https://github.com/hoonably)
+[Chrome 웹 스토어](https://chromewebstore.google.com/detail/oobgpakpaoknojmgkolgmmkjemjmimld) · [사용 가이드](docs/getting-started.md) · [데이터와 권한](docs/privacy.md) · [개발 가이드](docs/DEVELOPMENT.md)
