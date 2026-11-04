@@ -7,7 +7,7 @@
   const POSITION_KEY = "macro-studio.launcher-position.v1";
   const LIBRARY_EVENT = "macro-studio:library-state";
   const SIZE = 48, GAP = 12;
-  const gridIcon = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" fill="currentColor"/><rect x="14" y="3" width="7" height="7" rx="2" fill="currentColor" opacity=".65"/><rect x="3" y="14" width="7" height="7" rx="2" fill="currentColor" opacity=".65"/><rect x="14" y="14" width="7" height="7" rx="2" fill="currentColor"/></svg>`;
+  const brandIcon = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <rect width=\"64\" height=\"64\" rx=\"15\" fill=\"#2A3C91\"/>\n  <path d=\"M32 12h14c6 0 10 4.4 10 10v6H36Z\" fill=\"#96ACF9\"/>\n  <path fill=\"#FFF3D9\" fill-rule=\"evenodd\" d=\"M29 12h17c-4.7 1.2-6.8 5.6-8 11.7l-3.2 15.5C33.5 45.9 30.2 50.4 26 53H6c5.4-4.7 8.1-10 9.4-16.6l2.8-13.7C19.7 15.5 23 12 29 12Zm-4.6 9-1.1 5h5l1.1-5Zm-2.1 10-1.1 5h5l1.1-5Zm7.6 0-1.1 5h4.6l1.1-5Zm-10 10-1.9 5h5.1l1.9-5Z\"/>\n</svg>";
   const scriptIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5M8 16h8"/></svg>`;
   const archiveIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 8h16v12H4zM3 4h18v4H3zM9 12h6"/></svg>`;
 
@@ -28,9 +28,9 @@
         .empty{font-size:12px;color:#758297}.studio-open{width:100%;margin-top:12px;padding:11px;border:1px dashed #b5c9e4;border-radius:12px;background:white;color:#145fc0}button,input{font:inherit} button{cursor:pointer} button:disabled{cursor:default;opacity:.55}
         button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #8bb9ff;outline-offset:3px}
         .orb{position:relative;width:48px;height:48px;display:grid;place-items:center;border:1px solid #ffffff55;
-          border-radius:16px;background:#145fc0;color:#fff;box-shadow:0 4px 16px #173a6540;
-          padding:13px;touch-action:none;user-select:none;cursor:grab}
-        .orb:active{cursor:grabbing}.orb:hover{background:#0f50a6}.orb svg{width:22px;height:22px}
+          border-radius:12px;background:#2A3C91;color:#fff;box-shadow:0 4px 16px #173a6540;
+          padding:0;touch-action:none;user-select:none;cursor:grab}
+        .orb:active{cursor:grabbing}.orb:hover{filter:brightness(1.07)}.orb svg{width:100%;height:100%;display:block;pointer-events:none}
         .badge{position:absolute;right:-3px;top:-3px;width:16px;height:16px;display:grid;place-items:center;
           border:2px solid white;border-radius:50%;background:#16a34a;color:white;font:700 9px system-ui}
         .badge[data-state="running"]{background:#f59e0b}.badge[data-state="error"]{background:#dc2626}
@@ -69,7 +69,7 @@
         .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
       </style>
       <button class="orb" type="button" aria-label="Macro Studio 열기" aria-expanded="false" aria-controls="macro-studio-menu"
-        title="Macro Studio · 드래그해서 이동">${gridIcon}<span class="badge" hidden></span></button>
+        title="Macro Studio · 드래그해서 이동">${brandIcon}<span class="badge" hidden></span></button>
       <section class="panel" id="macro-studio-menu" role="dialog" aria-label="Macro Studio" hidden tabindex="-1">
         <header><button class="quiet back" type="button" aria-label="스크립트 목록으로" hidden>‹</button>
           <div class="brand"><strong>Macro Studio</strong><span>자주 하는 일을 간편하게</span></div>
