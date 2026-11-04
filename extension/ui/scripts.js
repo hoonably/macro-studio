@@ -3,7 +3,7 @@ import { readLocal, writeLocal } from '../scripts/store.js';
 import { folderReady, normalizeFolderPath, scriptsPath } from '../core/script-setup.js';
 const $ = selector => document.querySelector(selector);
 let folder = await readLocal('folder'), folderEpoch = await readLocal('resetEpoch'), state = null, pending = false, signature = '';
-let siteReadiness = null, setupSignature = '', pathDirty = false;
+let siteReadiness = null, setupSignature = '', pathDirty = false, editingPath = false;
 const checked = new Set();
 const say = (message, error = false) => { $('#script-state').textContent = message; $('#script-state').dataset.error = String(error); };
 async function request(type, payload = {}) {
@@ -14,6 +14,8 @@ async function request(type, payload = {}) {
 function render(next) {
   state = next;
   const readyFolder = folderReady(next), baseReady = readyFolder && next.enabled;
+  let confirmedPath = false;
+  try { normalizeFolderPath(next.folderPath, next.folderName); confirmedPath = true; } catch {}
   const site = siteReadiness || { ready: !!next.count && !(next.missingOrigins || []).length,
     detail: (next.missingOrigins || []).length ? '아래에서 사용할 주소를 선택해 허용하세요' : next.count ? '필요한 사이트가 허용됐습니다' : '작업실에서 자동화할 사이트를 선택하세요' };
   const readiness = [
@@ -36,9 +38,13 @@ function render(next) {
   $('#apply-script-settings').disabled = !readyFolder || pending;
   $('#folder-path').disabled = !next.connected || pending;
   $('#save-folder-path').disabled = !next.connected || pending;
+  $('#folder-path-setup').hidden = !next.connected || (confirmedPath && !editingPath);
+  $('#folder-location').hidden = !next.connected || !confirmedPath;
+  $('#edit-folder-path').disabled = pending;
+  $('#edit-folder-path').textContent = editingPath ? '경로 수정 닫기' : '경로 수정';
   if (!pathDirty) $('#folder-path').value = next.folderPath || '';
-  $('#folder-path-status').textContent = readyFolder ? '저장 경로 확인 완료' : next.connected ? '선택한 폴더의 전체 경로를 붙여넣고 확인하세요.' : '먼저 사용 폴더를 연결하세요.';
-  $('#script-target').textContent = readyFolder ? scriptsPath(next.folderPath, next.folderRelativePath) + '/<id>/' : '';
+  $('#folder-path-status').textContent = pathDirty ? '변경한 경로는 확인 버튼을 누른 뒤 사용합니다.' : confirmedPath ? '저장 경로 확인 완료' : '선택한 폴더의 전체 경로를 붙여넣고 확인하세요.';
+  $('#script-target').textContent = confirmedPath ? scriptsPath(next.folderPath, next.folderRelativePath) : '';
   if ($('#site-setup')) $('#site-setup').hidden = !baseReady;
   $('#connect-folder').disabled = pending || typeof window.showDirectoryPicker !== 'function';
   $('#connect-folder').textContent = next.connected ? '다른 폴더 연결' : '스크립트 폴더 연결';
@@ -132,11 +138,16 @@ $('#connect-folder').addEventListener('click', async () => {
     for await (const entry of selected.values()) { break; } // Confirm actual directory access, including an empty folder.
     const sameFolder = folder && await folder.isSameEntry(selected);
     await writeLocal({ folder: selected, ...(sameFolder ? {} : { folderPath: undefined }) }, selectedEpoch);
-    folder = selected; pathDirty = false;
+    folder = selected; pathDirty = false; editingPath = false;
     await refresh(true);
   } catch (error) { if (error.name !== 'AbortError') say(error.message, true); }
 });
 $('#folder-path').addEventListener('input', () => { pathDirty = true; $('#folder-path-status').textContent = '변경한 경로는 확인 버튼을 누른 뒤 사용합니다.'; });
+$('#edit-folder-path').addEventListener('click', () => {
+  editingPath = !editingPath; pathDirty = false;
+  if (state) render(state);
+  if (editingPath) $('#folder-path').focus();
+});
 $('#save-folder-path').addEventListener('click', async () => {
   try {
     if (!folder) throw new Error('먼저 사용 폴더를 연결하세요.');
@@ -144,7 +155,7 @@ $('#save-folder-path').addEventListener('click', async () => {
     const current = await readLocal('folder');
     if (!current || !await folder.isSameEntry(current)) throw new Error('연결 폴더가 바뀌었습니다. 폴더와 경로를 다시 확인하세요.');
     await writeLocal({ folderPath: path }, folderEpoch);
-    pathDirty = false;
+    pathDirty = false; editingPath = false;
     await refresh(true);
   } catch (error) { $('#folder-path-status').textContent = error.message; }
 });
@@ -154,7 +165,7 @@ $('#grant-folder').addEventListener('click', async () => {
   catch (error) { say(error.message, true); }
 });
 $('#sync-folder').addEventListener('click', () => refresh(true));
-$('#disconnect-folder').addEventListener('click', async () => { await writeLocal({ folder: undefined, folderPath: undefined }); folder = null; pathDirty = false; await refresh(true); });
+$('#disconnect-folder').addEventListener('click', async () => { await writeLocal({ folder: undefined, folderPath: undefined }); folder = null; pathDirty = false; editingPath = false; await refresh(true); });
 $('#grant-script-origins').addEventListener('click', async () => {
   const origins = (state?.missingOrigins || []).filter(origin => checked.has(origin));
   if (!origins.length || pending) return;

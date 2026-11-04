@@ -11,13 +11,13 @@
       <p><strong>먼저 개인 매크로를 저장할 폴더를 선택하세요.</strong> 원하는 위치에 빈 폴더를 만들어 선택해도 됩니다.</p>
       <p id="script-state" class="sync-status" role="status" aria-live="polite">설정을 확인하는 중…</p>
       <div class="actions script-actions"><button id="connect-folder" disabled>스크립트 폴더 연결</button><button id="grant-folder" class="secondary" hidden>폴더 읽기 다시 허용</button><button id="sync-folder" class="secondary">다시 확인</button><button id="disconnect-folder" class="text-button" hidden>동기화 중지</button></div>
-      <div class="folder-path-setup">
+      <div id="folder-path-setup" class="folder-path-setup" hidden>
         <label for="folder-path">선택한 사용 폴더의 전체 경로<input id="folder-path" type="text" autocomplete="off" spellcheck="false" placeholder="/Users/이름/Documents/MyMacros" disabled></label>
         <button id="save-folder-path" class="secondary" disabled>이 경로로 저장 위치 확인</button>
         <p id="folder-path-status" class="hint" role="status" aria-live="polite">먼저 사용 폴더를 연결하세요.</p>
-        <details class="path-help" open><summary>전체 경로 복사 방법</summary><p class="hint">Mac: Finder에서 선택한 폴더를 클릭하고 ⌥⌘C를 눌러 경로를 복사한 뒤 붙여넣으세요.<br>Windows: 탐색기에서 폴더를 열고 주소 표시줄을 클릭한 뒤 전체 경로를 복사하세요.<br>Chrome은 선택한 폴더 이름만 알려주므로 처음 한 번 경로 확인이 필요합니다. 폴더 이름이 일치하는지 확인하고 이후 지시문에 자동으로 넣습니다.</p></details>
-        <p class="hint">매크로 저장 위치: <code id="script-target"></code></p>
+        <details class="path-help"><summary>전체 경로 복사 방법</summary><p class="hint">Mac: Finder에서 선택한 폴더를 클릭하고 ⌥⌘C를 눌러 경로를 복사한 뒤 붙여넣으세요.<br>Windows: 탐색기에서 폴더를 열고 주소 표시줄을 클릭한 뒤 전체 경로를 복사하세요.<br>Chrome은 선택한 폴더 이름만 알려주므로 처음 한 번 경로 확인이 필요합니다. 폴더 이름이 일치하는지 확인하고 이후 지시문에 자동으로 넣습니다.</p></details>
       </div>
+      <div id="folder-location" class="folder-location" hidden><p class="hint">매크로 저장 위치: <code id="script-target"></code></p><button id="edit-folder-path" class="text-button">경로 수정</button></div>
       <div id="script-permission-setup" class="permission-setup" hidden><strong>폴더 연결 완료 · 실행 허용만 한 번 켜주세요</strong><p class="hint">① 아래 버튼으로 Macro Studio 확장 세부정보를 엽니다. ② ‘사용자 스크립트 허용’을 켭니다. ③ 이 화면으로 돌아와 ‘허용 상태 다시 확인’을 누릅니다. Chrome 135–137에서는 개발자 모드를 켜세요.</p><button id="script-settings" class="secondary">Chrome 실행 허용 설정 열기</button><button id="apply-script-settings" class="secondary">허용 상태 다시 확인</button></div>
       <p class="hint">연결한 사용 폴더 아래에 <code>&lt;id&gt;/script.json</code>과 <code>script.js</code>를 함께 저장합니다.</p>
       <p class="hint">연결한 폴더에서 스크립트를 추가·수정하면 목록에 자동으로 반영됩니다. script.json에 지정한 파일만 읽으며 원본 파일은 수정하지 않습니다.</p>
