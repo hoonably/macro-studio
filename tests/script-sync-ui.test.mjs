@@ -33,11 +33,11 @@ async function screen(enabled = true, page = 'scripts') {
   Object.assign(env.ctx, { STORE_BUILD: false, chrome, readLocal, writeLocal, scriptsLocation: async handle => ({ directory: handle, relativePath: [] }), folderReady, normalizeFolderPath, scriptsPath, setInterval: callback => { poll = callback; } });
   await vm.runInContext('(async () => {' + (await code('extension/ui/scripts.js')).replace(/^import[^\n]+\n/gm, '') + '\n})()', env.ctx);
   return { ...env, calls, state, recording, click: async selector => { gesture = true; env.document.querySelector(selector).click(); gesture = false; await tick(); },
-    poll: async () => { poll(); await tick(); }, deny: () => { granted = false; }, allow: () => { granted = true; }, revokeRead: () => { permission = 'prompt'; } };
+    poll: async () => { assert.equal(poll, undefined, 'Setup must not register a timer'); env.window.dispatchEvent(new env.window.Event('focus')); await tick(); }, deny: () => { granted = false; }, allow: () => { granted = true; }, revokeRead: () => { permission = 'prompt'; } };
 }
 
 for (const page of ['scripts', 'studio']) {
-test(page + ': folder setup and site permission requests use actual gestures; polling and reconnecting do not request access', async () => {
+test(page + ': folder setup and site permission requests use actual gestures; focus refreshes and reconnecting do not request access', async () => {
   const env = await screen(true, page);
   assert.equal(env.document.querySelector('#synced-scripts img'), null);
   await env.poll(); assert.equal(env.calls.filter(call => ['picker', 'sites', 'read'].includes(call[0])).length, 0);
@@ -78,10 +78,10 @@ test(page + ': first setup starts with folder selection, and applying updates pr
   assert.equal(env.document.querySelector('#connect-folder').disabled, false);
   assert.equal(env.document.querySelector('#script-permission-setup').hidden, true);
   await env.click('#connect-folder');
-  assert.equal(env.document.querySelector('#script-permission-setup').hidden, false);
-  assert.match(env.document.querySelector('#script-state').textContent, /폴더는 연결/);
+  assert.equal(env.document.querySelector('#script-permission-setup').hidden, true, 'Confirm the path before Chrome setup');
   env.document.querySelector('#folder-path').value = '/Users/example/scripts';
   await env.click('#save-folder-path');
+  assert.equal(env.document.querySelector('#script-permission-setup').hidden, false);
   env.recording.steps.push({ type: 'click' });
   env.recording.status = 'recording';
   await env.click('#apply-script-settings');
@@ -104,3 +104,21 @@ test(page + ': first setup starts with folder selection, and applying updates pr
   assert.equal(env.calls.filter(call => ['sites', 'read'].includes(call[0])).length, 0);
 });
 }
+
+test('setup refreshes preserve existing nodes, checked origins and an unfinished path edit', async () => {
+  const env = await screen();
+  await env.click('#connect-folder');
+  const input = env.document.querySelector('#folder-path');
+  input.value = '/Users/example/unfinished'; input.dispatchEvent(new env.window.Event('input'));
+  const row = env.document.querySelector('#setup-checklist li'), script = env.document.querySelector('#synced-scripts li');
+  const checkbox = env.document.querySelector('#script-origins input');
+  checkbox.checked = true; checkbox.dispatchEvent(new env.window.Event('change'));
+  await env.poll(); await env.poll();
+  assert.equal(env.document.querySelector('#setup-checklist li'), row);
+  assert.equal(env.document.querySelector('#synced-scripts li'), script);
+  assert.equal(env.document.querySelector('#script-origins input'), checkbox);
+  assert.equal(checkbox.checked, true);
+  assert.equal(input.value, '/Users/example/unfinished');
+  assert.equal(input.disabled, false);
+  assert.equal(env.document.querySelector('#save-folder-path').disabled, false);
+});

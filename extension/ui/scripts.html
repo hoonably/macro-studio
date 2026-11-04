@@ -1,40 +1,37 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>스크립트 자동 동기화 · Macro Studio</title><link rel="stylesheet" href="studio.css"></head>
-<body>
-  <header class="brand studio-brand"><img src="../assets/icon-48.png" width="36" height="36" alt=""><div><strong>Macro Studio</strong><p>스크립트와 확장 업데이트를 자동으로 반영합니다.</p></div><nav class="help-links"><a href="studio.html">작업 기록</a><a href="library.html">스크립트 보관함</a></nav></header>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>설정 · Macro Studio</title><link rel="stylesheet" href="studio.css"></head><body>
+  <header class="brand studio-brand"><a class="brand-home" href="studio.html"><img src="../assets/icon-48.png" width="32" height="32" alt=""><strong>Macro Studio</strong></a><nav aria-label="주요 메뉴"><a href="studio.html">만들기</a><a href="library.html">내 매크로</a><a href="scripts.html" aria-current="page">설정</a></nav></header>
   <main>
-    <section>
-      <div class="section-heading"><h2>사용 준비</h2><span class="section-caption">필요한 권한만 한 번</span></div>
-      <p class="setup-intro">파일을 읽고 실행할 범위를 직접 정하세요. 폴더·Chrome 실행 허용·사이트 접근을 확인한 뒤 매크로를 만듭니다.</p>
+    <section class="setup-card" id="setup-section" aria-labelledby="setup-title">
+      <div class="section-heading"><div><p class="eyebrow">1 · 처음 한 번</p><h1 id="setup-title">사용 준비</h1></div><span id="setup-result" class="pill">확인 중</span></div>
       <ol id="setup-checklist" class="setup-checklist" aria-label="사용 준비 상태"></ol>
-      <h3>스크립트 폴더 연결</h3>
-      <p><strong>먼저 개인 매크로를 저장할 폴더를 선택하세요.</strong> 원하는 위치에 빈 폴더를 만들어 선택해도 됩니다.</p>
-      <p id="script-state" class="sync-status" role="status" aria-live="polite">설정을 확인하는 중…</p>
-      <div class="actions script-actions"><button id="connect-folder" disabled>스크립트 폴더 연결</button><button id="grant-folder" class="secondary" hidden>폴더 읽기 다시 허용</button><button id="sync-folder" class="secondary">다시 확인</button><button id="disconnect-folder" class="text-button" hidden>동기화 중지</button></div>
-      <div id="folder-path-setup" class="folder-path-setup" hidden>
-        <label for="folder-path">선택한 사용 폴더의 전체 경로<input id="folder-path" type="text" autocomplete="off" spellcheck="false" placeholder="/Users/이름/Documents/MyMacros" disabled></label>
-        <button id="save-folder-path" class="secondary" disabled>이 경로로 저장 위치 확인</button>
-        <p id="folder-path-status" class="hint" role="status" aria-live="polite">먼저 사용 폴더를 연결하세요.</p>
-        <details class="path-help"><summary>전체 경로 복사 방법</summary><p class="hint">Mac: Finder에서 선택한 폴더를 클릭하고 ⌥⌘C를 눌러 경로를 복사한 뒤 붙여넣으세요.<br>Windows: 탐색기에서 폴더를 열고 주소 표시줄을 클릭한 뒤 전체 경로를 복사하세요.<br>Chrome은 선택한 폴더 이름만 알려주므로 처음 한 번 경로 확인이 필요합니다. 폴더 이름이 일치하는지 확인하고 이후 지시문에 자동으로 넣습니다.</p></details>
+      <p id="script-state" class="status-line" role="status" aria-live="polite"></p>
+      <div id="folder-step" class="setup-step">
+        <h2>매크로를 저장할 폴더를 선택하세요</h2><p class="hint">원하는 위치에 빈 폴더를 만들어 선택하세요.</p>
+        <div class="actions compact"><button id="connect-folder" disabled>폴더 선택</button><button id="grant-folder" class="secondary" hidden>폴더 읽기 다시 허용</button></div>
+        <div id="folder-path-setup" class="folder-path-setup" hidden>
+          <label for="folder-path">선택한 폴더의 경로<input id="folder-path" autocomplete="off" spellcheck="false" placeholder="/Users/이름/Documents/MyMacros" disabled></label>
+          <div class="actions compact"><button id="save-folder-path" disabled>저장 위치 확인</button></div>
+          <p id="folder-path-status" class="hint" role="status" aria-live="polite"></p>
+          <details class="path-help"><summary>경로를 어디서 복사하나요?</summary><p class="hint">Mac: Finder에서 폴더를 선택하고 ⌥⌘C를 누르세요.<br>Windows: 탐색기 주소 표시줄에서 전체 경로를 복사하세요.<br>Chrome은 폴더 이름만 제공하므로 처음 한 번 확인합니다.</p></details>
+        </div>
       </div>
-      <div id="folder-location" class="folder-location" hidden><p class="hint">매크로 저장 위치: <code id="script-target"></code></p><button id="edit-folder-path" class="text-button">경로 수정</button></div>
-      <div id="script-permission-setup" class="permission-setup" hidden><strong>폴더 연결 완료 · 실행 허용만 한 번 켜주세요</strong><p class="hint">① 아래 버튼으로 Macro Studio 확장 세부정보를 엽니다. ② ‘사용자 스크립트 허용’을 켭니다. ③ 이 화면으로 돌아와 ‘허용 상태 다시 확인’을 누릅니다. Chrome 135–137에서는 개발자 모드를 켜세요.</p><button id="script-settings" class="secondary">Chrome 실행 허용 설정 열기</button><button id="apply-script-settings" class="secondary">허용 상태 다시 확인</button></div>
-      <p class="hint">연결한 사용 폴더 아래에 <code>&lt;id&gt;/script.json</code>과 <code>script.js</code>를 함께 저장합니다.</p>
-      <p class="hint">연결한 폴더에서 스크립트를 추가·수정하면 목록에 자동으로 반영됩니다. script.json에 지정한 파일만 읽으며 원본 파일은 수정하지 않습니다.</p>
-      <p id="sync-timing" class="hint">이 화면이나 작업실이 열려 있으면 약 2초마다, 닫혀 있어도 약 30초 간격으로 확인합니다. Chrome이 쉬는 동안에는 확인이 늦어질 수 있습니다.</p>
-      <p id="sync-detail" class="hint"></p>
-      <ul id="sync-errors" class="sync-errors"></ul>
+      <div id="folder-location" class="folder-location" hidden><span class="hint">저장 위치</span><code id="script-target"></code><button id="edit-folder-path" class="text-button">변경</button></div>
+      <div id="script-permission-setup" class="setup-step" hidden>
+        <h2>Chrome에서 매크로 실행을 허용하세요</h2><ol class="instruction-list"><li>‘Chrome 설정 열기’를 누릅니다.</li><li>Macro Studio의 <strong>사용자 스크립트 허용</strong>을 켭니다.</li><li>이 화면으로 돌아와 ‘허용 상태 확인’을 누릅니다.</li></ol>
+        <div class="actions"><button id="script-settings" class="secondary">Chrome 설정 열기</button><button id="apply-script-settings">허용 상태 확인</button></div>
+        <details><summary>설정이 보이지 않나요?</summary><p class="hint">Chrome 135–137에서는 확장 관리 화면의 개발자 모드를 켜세요.</p></details>
+      </div>
+
+      <p id="sync-detail" class="hint"></p><ul id="sync-errors" class="sync-errors" aria-live="polite"></ul>
+      <details id="connection-settings" class="connection-details" hidden><summary>폴더 설정</summary><div class="actions compact"><button id="change-folder" class="secondary">다른 폴더 선택</button><button id="disconnect-folder" class="text-button" hidden>연결 중지</button><button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button></div><p class="hint">연결을 중지해도 가져온 매크로와 원본 파일은 유지됩니다.</p></details>
     </section>
-    <section id="script-origins-section" hidden>
-      <h2>새 스크립트가 사용할 사이트</h2><p class="hint">아직 허용하지 않은 사이트입니다. 사용할 주소만 선택하세요. 이미 허용한 주소는 다시 요청하지 않습니다.</p>
-      <ul id="script-origins" class="frame-sites"></ul><button id="grant-script-origins" disabled>선택한 사이트 허용</button>
-    </section>
-    <section>
-      <div class="section-heading"><h2>연결한 스크립트</h2><span id="synced-count" class="pill">0개</span></div>
-      <ul id="synced-scripts" class="synced-scripts"></ul><p id="synced-empty" class="empty">폴더 안의 각 스크립트에 script.json과 실행 파일을 넣으면 여기에 나타납니다.</p>
-      <p class="hint">파일을 저장해도 자동으로 작업을 실행하지 않습니다. 사이트에서 파란 버튼을 열어 직접 실행하세요. 실행 중인 작업이 끝난 뒤 변경사항을 반영합니다. 동기화를 중지해도 마지막으로 가져온 스크립트는 유지됩니다.</p>
-    </section>
-    <footer><button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button> · <a href="reset.html">처음 상태로 초기화</a> · <a href="privacy.html" target="_blank" rel="noopener noreferrer">데이터와 권한</a></footer>
-  </main><script type="module" src="scripts.js"></script>
-  <script type="module" src="update.js"></script>
+
+    <section>      <div class="section-heading"><div><h2>연결한 매크로</h2><p class="hint">파일이 준비되면 아래에 표시됩니다.</p></div><span id="synced-count" class="pill">0개</span></div>
+      <ul id="synced-scripts" class="synced-scripts"></ul><p id="synced-empty" class="empty">아직 매크로가 없습니다.</p>
+      <div class="actions compact"><button id="sync-folder" class="secondary">파일 반영 확인</button><a class="button-link quiet-link" href="library.html">내 매크로 보기</a></div>
+      <div id="script-origins-section" class="setup-step" hidden><h3>매크로가 사용할 사이트</h3><p class="hint">필요한 주소를 선택해 허용하세요.</p><ul id="script-origins" class="frame-sites"></ul><button id="grant-script-origins" disabled>선택한 사이트 허용</button></div>
+</section>
+    <footer><a href="privacy.html" target="_blank" rel="noopener noreferrer">데이터와 권한</a><a href="reset.html">전체 초기화</a></footer>
+  </main><script type="module" src="scripts.js"></script><script type="module" src="update.js"></script>
 </body></html>

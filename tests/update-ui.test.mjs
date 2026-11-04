@@ -24,7 +24,7 @@ async function screen({ store = true, preferences, available, response = { statu
   Object.assign(env.ctx, { chrome, STORE_BUILD: store, UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, notificationsEnabled, availableVersion, updateMessage,
     setInterval: callback => { interval = callback; } });
   await vm.runInContext('(async () => {' + (await code('extension/ui/update.js')).replace(/^import[^\n]+\n/gm, '') + '\n})()', env.ctx);
-  return { ...env, calls, local, change, poll: async () => { interval?.(); await tick(); },
+  return { ...env, calls, local, change, poll: async () => { assert.equal(interval, undefined, 'No UI update timer'); env.window.dispatchEvent(new env.window.Event('focus')); await tick(); },
     click: async selector => { env.document.querySelector(selector).click(); await tick(); } };
 }
 

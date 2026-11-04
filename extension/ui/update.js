@@ -105,7 +105,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
   if (STORE_BUILD && (changes[AVAILABLE_UPDATE_KEY] || changes[UPDATE_PREFERENCES_KEY])) await showAvailableUpdate();
 });
 document.addEventListener('visibilitychange', () => checkBuild());
-if (!STORE_BUILD) setInterval(() => checkBuild(), 2000);
+window.addEventListener('focus', () => checkBuild());
 await readPreferences();
 await checkBuild();
 if (window.location.hash === '#updates') dialog.showModal();

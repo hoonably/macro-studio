@@ -13,6 +13,10 @@ function saveDraft() {
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id) return;
+  if (message.type === 'frames:changed' && message.tabId === targetTabId() && document.visibilityState !== 'hidden') {
+    if (framePending) frameAgain = true; else refreshFrames();
+    return;
+  }
   if (message.type === 'studio:reset') {
     restoringDraft = true;
     draftWrites.catch(() => {}).then(() => {
@@ -33,7 +37,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 let recording = null, active = null;
 let setupState = null, creationOpened = false, siteReadinessSignature = '';
 const excludedFrames = new Set();
-let frameInfo = null, frameSignature = '', frameRequest = 0, framePending = false, permissionBusy = false;
+let frameInfo = null, frameSignature = '', frameRequest = 0, framePending = false, frameAgain = false, permissionBusy = false;
 const selectedFrames = new Set();
 const targetTabId = () => recording?.status === 'recording' ? recording.tabId : active?.id;
 const status = (message, error = false) => {
@@ -63,7 +67,9 @@ function creationControls() {
   $('#creation-gate').textContent = !folderReady(setupState) ? '1. 사용 폴더를 연결하고 전체 저장 경로를 확인하세요.' :
     !setupState.enabled ? '2. Chrome의 사용자 스크립트 허용을 켜고 허용 상태를 다시 확인하세요.' :
     !siteReadiness().ready ? '3. 사이트 접근 안내에 따라 자동화할 사이트를 확인하세요.' :
-    '사용 준비 완료. 이 폴더에 저장할 매크로를 만들 수 있습니다.';
+    creationOpened ? '' : '준비가 끝났습니다. 작업을 기록해 매크로를 만드세요.';
+  $('#creation-gate').hidden = creationOpened && ready;
+  $('#open-creation').textContent = ready ? '작업 기록하기' : '사용 준비를 먼저 완료하세요';
   const site = siteReadiness(), signature = JSON.stringify(site);
   if (signature !== siteReadinessSignature) {
     siteReadinessSignature = signature;
@@ -156,7 +162,12 @@ async function refreshFrames(force = false) {
     if (current === frameRequest && tabId === targetTabId()) renderFrames(info);
   } catch (error) {
     if (current === frameRequest) clearFrames(error.message, true);
-  } finally { if (current === frameRequest) framePending = false; }
+  } finally {
+    if (current === frameRequest) {
+      framePending = false;
+      if (frameAgain) { frameAgain = false; refreshFrames(); }
+    }
+  }
 }
 const payload = () => ({ ...recording, name: $('#name').value || recording.name });
 function updatePreview() {
@@ -260,6 +271,7 @@ $('#stop').addEventListener('click', async () => {
     const frames = [...new Set([0, ...(state?.steps || []).map(step => step.frameId)])];
     await Promise.allSettled(frames.map(frameId => chrome.tabs.sendMessage(state.tabId, { type: 'capture:flush' }, { frameId })));
     render(await request('recording:stop'));
+    $('#record-details').open = !!recording?.steps.length;
     await refreshFrames(true);
   } catch (error) { status(error.message, true); $('#stop').disabled = false; }
 });
@@ -270,7 +282,7 @@ $('#prompt').addEventListener('click', async () => {
     updatePreview();
   } catch (error) { status(error.message, true); return; }
   try { await navigator.clipboard.writeText($('#preview').value); status('복사했습니다. Codex 또는 Claude Code 채팅에 붙여넣으세요. 저장 위치는 지시문에 포함했습니다.'); }
-  catch { $('#preview').focus(); $('#preview').select(); status('미리보기에서 직접 복사하세요.'); }
+  catch { $('#preview').closest('details').open = true; $('#preview').focus(); $('#preview').select(); status('미리보기에서 직접 복사하세요.'); }
 });
 $('#download').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(exportRecording(payload()), null, 2)], { type: 'application/json' });
@@ -288,7 +300,8 @@ chrome.tabs.onUpdated.addListener((tabId, change) => { if (tabId === active?.id 
 chrome.permissions.onAdded.addListener(() => refreshFrames(true));
 chrome.permissions.onRemoved.addListener(() => refreshFrames(true));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') refreshFrames(true); });
-setInterval(() => { if (document.visibilityState !== 'hidden' && !permissionBusy) refreshFrames(); }, 1500);
+window.addEventListener('focus', () => refreshTab().then(() => refreshFrames(true)).catch(() => {}));
+$('#scan-frames').addEventListener('click', () => refreshFrames(true));
 await refreshTab();
 try { await refreshSetup(); } catch (error) { $('#creation-gate').textContent = error.message; }
 try {

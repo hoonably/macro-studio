@@ -411,3 +411,17 @@ chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'macro-studio-script-sync') serial(async () => localScripts.sync(await catalog())).catch(console.error);
   if (alarm.name === 'macro-studio-build-check' && !STORE_BUILD) serial(() => buildUpdates.check()).catch(console.error);
 });
+
+// Register synchronously for worker wakeups; retry when an optional API becomes available.
+let navigationListening = false;
+function watchFrameNavigation() {
+  if (navigationListening || !chrome.webNavigation?.onCompleted) return;
+  try {
+    chrome.webNavigation.onCompleted.addListener(({ tabId }) => {
+      if (Number.isInteger(tabId) && tabId >= 0) chrome.runtime.sendMessage({ type: 'frames:changed', tabId }).catch(() => {});
+    });
+    navigationListening = true;
+  } catch { /* Optional permission can still be unavailable until the user grants it. */ }
+}
+watchFrameNavigation();
+chrome.permissions.onAdded.addListener(watchFrameNavigation);

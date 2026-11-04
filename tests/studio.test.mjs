@@ -9,11 +9,11 @@ import { folderReady, scriptsPath } from '../extension/core/script-setup.js';
 async function studio({ enabled = false, sites = [], initialRecording = null, session = {}, setup = {
   connected: true, readable: true, enabled: true, folderName: 'scripts', folderPath: '/Users/example/MyMacros/scripts', folderRelativePath: []
 } } = {}) {
-  let active = { id: 42, url: 'https://example.test/form' }, recording = structuredClone(initialRecording), approve = true, gesture = false, poll, activated, clipboardFailure = false;
+  let active = { id: 42, url: 'https://example.test/form' }, recording = structuredClone(initialRecording), approve = true, gesture = false, poll, listener, activated, clipboardFailure = false;
   const permissionCalls = [], messages = [], copied = [];
   let frameResult = null;
   const chrome = {
-    runtime: { id: 'studio', onMessage: { addListener() {} }, sendMessage: async message => {
+    runtime: { id: 'studio', onMessage: { addListener: callback => { listener = callback; } }, sendMessage: async message => {
       messages.push(message);
       if (message.type === 'studio:state') return { ok: true, value: recording };
       if (message.type === 'local:status') return { ok: true, value: { ...setup } };
@@ -62,7 +62,7 @@ async function studio({ enabled = false, sites = [], initialRecording = null, se
     setApproval: value => { approve = value; },
     failClipboard: () => { clipboardFailure = true; },
     click, open: () => click('#open-creation'),
-    poll: async () => { poll(); await tick(); },
+    poll: async () => { assert.equal(poll, undefined, 'Frames use navigation events, not a timer'); listener({ type: 'frames:changed', tabId: recording?.status === 'recording' ? recording.tabId : active.id }, { id: 'studio' }, () => {}); await tick(); },
     activate: async tab => { active = tab; await activated(); await tick(); }
   };
 }
@@ -139,7 +139,7 @@ test('new frames during recording are suggested without a popup and stay bound t
   assert.match(env.document.querySelector('#site').textContent, /example\.test/);
 });
 
-test('step deletion preserves remaining recording metadata and the visible preview copies with changing-value instructions', async () => {
+test('step deletion preserves remaining recording metadata and the collapsed preview copies with changing-value instructions', async () => {
   const env = await studio({ enabled: true, initialRecording: {
     name: '기록 테스트', status: 'stopped', tabId: 42, createdAt: 'now', steps: [
       { id: 'date', ...normalizeEvent({ action: 'input', page: { url: 'https://example.test/form' }, target: { label: '출장일' }, value: '2026-10-24' }) },
@@ -149,7 +149,7 @@ test('step deletion preserves remaining recording metadata and the visible previ
   await env.open();
   const preview = env.document.querySelector('#preview'), variables = env.document.querySelector('#variables');
   assert.equal(env.document.querySelectorAll('#steps select, #steps input').length, 0);
-  assert.equal(preview.closest('details'), null);
+  assert.equal(preview.closest('details').open, undefined, 'Prompt details start collapsed');
   assert.equal(env.document.querySelector('#goal').value, '', 'Example text is a hint, not an automation instruction');
   assert.equal(variables.value, '', 'Example variables are not included until the user enters them');
   variables.value = '출장일, 출장 시간'; variables.dispatchEvent(new env.window.Event('input'));
@@ -165,7 +165,7 @@ test('step deletion preserves remaining recording metadata and the visible previ
   assert.deepEqual(structuredClone(env.messages.filter(message => message.type === 'recording:edit')), [{ type: 'recording:edit', id: 'date', remove: true }]);
   let selected = false; preview.select = () => { selected = true; };
   env.failClipboard(); await env.click('#prompt');
-  assert.equal(selected, true, 'Clipboard failures select the visible preview without relying on a removed toggle');
+  assert.equal(selected, true, 'Clipboard failures select the visible preview after expanding the preview');
   assert.match(env.document.querySelector('#status').textContent, /직접 복사/);
 });
 

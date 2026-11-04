@@ -1,75 +1,61 @@
 <!doctype html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Macro Studio</title><link rel="stylesheet" href="studio.css">
-</head>
-<body>
-  <header class="brand studio-brand"><img src="../assets/icon-48.png" width="36" height="36" alt=""><div><strong>Macro Studio</strong><p>작업을 보여주면, 나만의 매크로가 됩니다.</p></div></header>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>매크로 만들기 · Macro Studio</title><link rel="stylesheet" href="studio.css"></head><body>
+  <header class="brand studio-brand"><a class="brand-home" href="studio.html"><img src="../assets/icon-48.png" width="32" height="32" alt=""><strong>Macro Studio</strong></a><nav aria-label="주요 메뉴"><a href="studio.html" aria-current="page">만들기</a><a href="library.html">내 매크로</a><a href="scripts.html">설정</a></nav></header>
   <main>
-    <section class="scripts-connection">
-      <h2>먼저 사용 준비를 완료하세요</h2>
-      <div class="setup-overview"><p class="setup-intro">사용 폴더 → Chrome 실행 허용 → 사이트 접근 순서로 진행합니다.</p><p class="hint">폴더와 사이트는 직접 선택한 범위만 허용합니다. 폴더·Chrome 실행 허용·사이트 접근을 확인한 뒤 매크로를 만듭니다.</p><ol id="setup-checklist" class="setup-checklist" aria-label="사용 준비 상태"></ol></div>
-      <p class="folder-guide"><strong>먼저 개인 매크로를 저장할 폴더를 선택하세요.</strong> 원하는 위치에 빈 폴더를 만들어 선택해도 됩니다.</p>
-      <p id="script-state" class="sync-status" role="status" aria-live="polite">설정을 확인하는 중…</p>
-      <div class="actions script-actions"><button id="connect-folder" disabled>스크립트 폴더 연결</button><button id="grant-folder" class="secondary" hidden>폴더 읽기 다시 허용</button></div>
-      <p class="hint">연결한 사용 폴더 아래에 <code>&lt;id&gt;/script.json</code>과 <code>script.js</code>를 함께 저장합니다.</p>
-      <div id="folder-path-setup" class="folder-path-setup" hidden>
-        <label for="folder-path">선택한 사용 폴더의 전체 경로<input id="folder-path" type="text" autocomplete="off" spellcheck="false" placeholder="/Users/이름/Documents/MyMacros" disabled></label>
-        <button id="save-folder-path" class="secondary" disabled>이 경로로 저장 위치 확인</button>
-        <p id="folder-path-status" class="hint" role="status" aria-live="polite">먼저 사용 폴더를 연결하세요.</p>
-        <details class="path-help"><summary>전체 경로 복사 방법</summary><p class="hint">Mac: Finder에서 선택한 폴더를 클릭하고 ⌥⌘C를 눌러 경로를 복사한 뒤 붙여넣으세요.<br>Windows: 탐색기에서 폴더를 열고 주소 표시줄을 클릭한 뒤 전체 경로를 복사하세요.<br>Chrome은 선택한 폴더 이름만 알려주므로 처음 한 번 경로 확인이 필요합니다. 폴더 이름이 일치하는지 확인하고 이후 지시문에 자동으로 넣습니다.</p></details>
+    <section class="setup-card" id="setup-section" aria-labelledby="setup-title">
+      <div class="section-heading"><div><p class="eyebrow">1 · 처음 한 번</p><h1 id="setup-title">사용 준비</h1></div><span id="setup-result" class="pill">확인 중</span></div>
+      <ol id="setup-checklist" class="setup-checklist" aria-label="사용 준비 상태"></ol>
+      <p id="script-state" class="status-line" role="status" aria-live="polite"></p>
+      <div id="folder-step" class="setup-step">
+        <h2>매크로를 저장할 폴더를 선택하세요</h2><p class="hint">원하는 위치에 빈 폴더를 만들어 선택하세요.</p>
+        <div class="actions compact"><button id="connect-folder" disabled>폴더 선택</button><button id="grant-folder" class="secondary" hidden>폴더 읽기 다시 허용</button></div>
+        <div id="folder-path-setup" class="folder-path-setup" hidden>
+          <label for="folder-path">선택한 폴더의 경로<input id="folder-path" autocomplete="off" spellcheck="false" placeholder="/Users/이름/Documents/MyMacros" disabled></label>
+          <div class="actions compact"><button id="save-folder-path" disabled>저장 위치 확인</button></div>
+          <p id="folder-path-status" class="hint" role="status" aria-live="polite"></p>
+          <details class="path-help"><summary>경로를 어디서 복사하나요?</summary><p class="hint">Mac: Finder에서 폴더를 선택하고 ⌥⌘C를 누르세요.<br>Windows: 탐색기 주소 표시줄에서 전체 경로를 복사하세요.<br>Chrome은 폴더 이름만 제공하므로 처음 한 번 확인합니다.</p></details>
+        </div>
       </div>
-      <div id="folder-location" class="folder-location" hidden><p class="hint">매크로 저장 위치: <code id="script-target"></code></p><button id="edit-folder-path" class="text-button">경로 수정</button></div>
-      <div id="script-permission-setup" class="permission-setup" hidden><strong>폴더 연결 완료 · 실행 허용만 한 번 켜주세요</strong><p class="hint">① 아래 버튼으로 Macro Studio 확장 세부정보를 엽니다. ② ‘사용자 스크립트 허용’을 켭니다. ③ 이 화면으로 돌아와 ‘허용 상태 다시 확인’을 누릅니다. Chrome 135–137에서는 개발자 모드를 켜세요.</p><button id="script-settings" class="secondary">Chrome 실행 허용 설정 열기</button><button id="apply-script-settings" class="secondary">허용 상태 다시 확인</button></div>
-      <div id="script-origins-section" hidden><h3>새 스크립트가 사용할 사이트</h3><p class="hint">사용할 주소만 선택해 한 번 허용하세요.</p><ul id="script-origins" class="frame-sites"></ul><button id="grant-script-origins" disabled>선택한 사이트 허용</button></div>
-      <div id="site-setup" hidden>
-      <h3>3. 자동화할 사이트 허용</h3><p class="hint">자동화할 웹사이트 탭을 열고 ‘이 사이트에서 사용하기’를 누른 뒤 Chrome의 허용 창에서 승인하세요. 내부 화면 주소가 나오면 필요한 주소를 체크하고 ‘선택한 내부 화면 허용’을 누르세요. 광고 등 관계없는 주소는 선택하지 않고 제외할 수 있습니다.</p>
-      <p id="site" class="site">현재 탭을 확인하는 중…</p>
-      <p id="site-status" role="status" aria-live="polite"></p>
-      <button id="allow" class="secondary">이 사이트에서 사용하기</button>
-      <div class="frame-detection" aria-labelledby="frames-title"><h3 id="frames-title">내부 화면 자동 감지</h3><p id="frame-status" class="hint" role="status" aria-live="polite">내부 화면을 확인하는 중…</p><ul id="frame-sites" class="frame-sites"></ul><button id="allow-frames" class="secondary" hidden disabled>선택한 내부 화면 허용</button><button id="skip-frames" class="text-button" hidden>선택하지 않은 내부 사이트는 제외하고 계속</button></div>
+      <div id="folder-location" class="folder-location" hidden><span class="hint">저장 위치</span><code id="script-target"></code><button id="edit-folder-path" class="text-button">변경</button></div>
+      <div id="script-permission-setup" class="setup-step" hidden>
+        <h2>Chrome에서 매크로 실행을 허용하세요</h2><ol class="instruction-list"><li>‘Chrome 설정 열기’를 누릅니다.</li><li>Macro Studio의 <strong>사용자 스크립트 허용</strong>을 켭니다.</li><li>이 화면으로 돌아와 ‘허용 상태 확인’을 누릅니다.</li></ol>
+        <div class="actions"><button id="script-settings" class="secondary">Chrome 설정 열기</button><button id="apply-script-settings">허용 상태 확인</button></div>
+        <details><summary>설정이 보이지 않나요?</summary><p class="hint">Chrome 135–137에서는 확장 관리 화면의 개발자 모드를 켜세요.</p></details>
       </div>
-      <ul id="sync-errors" class="sync-errors"></ul>
-      <details class="connection-details"><summary>연결 상태·관리</summary>
-        <p class="hint">한 번 연결하면 파일을 저장할 때 자동 반영됩니다. 별도로 받은 개인 스크립트 폴더도 연결할 수 있습니다. 원본 파일은 수정하지 않습니다.</p>
-        <div class="section-heading"><h3>연결한 스크립트</h3><span id="synced-count" class="pill">0개</span></div>
-        <ul id="synced-scripts" class="synced-scripts"></ul><p id="synced-empty" class="empty">아직 스크립트가 없습니다. 작업을 기록해 에이전트와 만든 스크립트를 연결한 폴더에 저장하세요.</p>
-        <p id="sync-detail" class="hint"></p>
-        <div class="actions script-actions"><button id="sync-folder" class="secondary">다시 확인</button><button id="disconnect-folder" class="text-button" hidden>동기화 중지</button></div>
-        <p class="hint">동기화를 중지해도 마지막으로 가져온 스크립트는 유지됩니다. 실행은 사이트의 파란 버튼에서 직접 시작하세요.</p>
-        <button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button>
+      <details id="site-options" hidden open><summary>사이트 접근 완료하기</summary>
+      <div id="site-setup" class="setup-step" hidden>
+        <h2>자동화할 사이트를 허용하세요</h2><p class="hint">작업할 웹사이트 탭을 열고 아래 버튼을 누르세요. Chrome 안내가 나오면 허용합니다.</p>
+        <p id="site" class="site">웹사이트를 확인하는 중…</p><button id="allow" class="secondary">이 사이트에서 사용하기</button><p id="site-status" class="status-line" role="status" aria-live="polite"></p>
+        <div class="frame-detection"><p id="frame-status" class="hint" role="status" aria-live="polite"></p><ul id="frame-sites" class="frame-sites"></ul><div class="actions compact"><button id="allow-frames" hidden disabled>선택한 내부 화면 허용</button><button id="skip-frames" class="text-button" hidden>선택하지 않은 주소 제외</button><button id="scan-frames" class="text-button">내부 화면 다시 확인</button></div></div>
+      </div>
       </details>
+      <p id="site-summary" class="hint" hidden></p>
+
+      <p id="sync-detail" class="hint"></p><ul id="sync-errors" class="sync-errors" aria-live="polite"></ul>
+      <details id="connection-settings" class="connection-details" hidden><summary>폴더 설정</summary><div class="actions compact"><button id="change-folder" class="secondary">다른 폴더 선택</button><button id="disconnect-folder" class="text-button" hidden>연결 중지</button><button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button></div><p class="hint">연결을 중지해도 가져온 매크로와 원본 파일은 유지됩니다.</p></details>
     </section>
-    <p id="creation-gate" class="sync-status" role="status">사용 준비를 확인하는 중…</p>
-    <button id="open-creation" disabled>준비 완료 후 매크로 만들기</button>
+
+    <p id="creation-gate" class="hint" role="status">사용 준비를 확인하는 중…</p><button id="open-creation" class="wide" disabled>준비를 마치고 작업 기록하기</button>
     <div id="macro-workspace" hidden>
-    <section>
-      <h2>1. 작업 기록</h2>
-      <label>자동화 이름<input id="name" value="나의 자동화" maxlength="100"></label>
-      <div class="actions"><button id="start">새 기록 시작</button><button id="stop" class="danger" disabled>기록 끝내기</button></div>
-      <p class="hint">기록은 직접 누르는 클릭·입력만 관찰합니다. 비밀번호·인증번호 필드는 제외하며, 영상은 저장하지 않습니다. 일반 입력값은 기록되니 공유 전에 확인하세요.</p>
-      <p id="status" role="status" aria-live="polite">준비되었습니다.</p>
-    </section>
-    <section>
-      <div class="section-heading"><h2>2. 단계 확인</h2><span id="count" class="pill">0단계</span></div>
-      <p class="hint">불필요하거나 전달하지 않을 단계는 삭제하세요. 매번 바꿀 값은 아래에 한 번만 적으면 됩니다.</p>
-      <ol id="steps" class="steps"></ol><p id="empty" class="empty">기록을 시작하고 웹페이지에서 평소 작업을 해보세요.</p>
-    </section>
-    <section>
-      <h2>3. 에이전트와 만들기</h2>
-      <ol class="agent-guide"><li>아래에 자동화할 순서·중단 지점과 실행마다 바꿀 값을 적습니다.</li><li>‘에이전트용 프롬프트 복사’를 누르고 Codex 또는 Claude Code 채팅에 그대로 붙여넣습니다.</li><li>에이전트가 지시문에 적힌 저장 위치에 파일 두 개를 만들면 여기로 돌아와 자동 반영된 매크로를 확인합니다.</li><li>대상 사이트의 파란 버튼에서 매크로를 실행합니다. 최종 제출은 직접 합니다.</li></ol>
-      <label>무엇을 자동화할까요?<textarea id="goal" rows="4" placeholder="자동화할 작업 순서와 완료할 지점을 적어주세요.&#10;(예: 업무 메뉴 → 신청서 열기 → 값 입력 → 승인자 선택 → 최종 제출 직전에 멈춤)"></textarea></label>
-      <label>바뀌는 값<textarea id="variables" rows="2" placeholder="실행할 때마다 바꿀 값을 적어주세요.&#10;(예: 날짜, 시작 시간, 종료 시간)"></textarea></label>
-      <div class="prompt-preview"><label for="preview">전달할 내용 보기</label><textarea id="preview" rows="10" readonly aria-label="에이전트에게 전달할 내용"></textarea></div>
-      <div class="actions"><button id="prompt" disabled>에이전트용 프롬프트 복사</button><button id="download" class="secondary" disabled>JSON 저장</button></div>
-      <p class="hint">지시문에는 확인한 사용 폴더의 전체 경로가 포함됩니다. 에이전트가 다른 작업 폴더에 저장하지 않았는지 완료 메시지의 경로를 확인하세요. 내용은 직접 복사해 전달합니다.</p>
-      <button id="clear" class="text-button" disabled>현재 기록 지우기</button>
-    </section>
+      <section class="step-panel" aria-labelledby="record-title"><p class="eyebrow">2 · 작업 보여주기</p><h2 id="record-title">평소처럼 한 번 작업하세요</h2><p class="hint">기록을 시작한 뒤 웹사이트에서 클릭하고 입력하세요. 최종 제출 직전에는 멈추세요.</p>
+        <label for="name">매크로 이름<input id="name" value="나의 자동화" maxlength="100"></label><div class="actions"><button id="start">기록 시작</button><button id="stop" class="danger" disabled>기록 끝내기</button></div><p id="status" class="status-line" role="status" aria-live="polite"></p>
+        <details id="record-details"><summary>기록한 동작 확인 <span id="count" class="pill">0단계</span></summary><ol id="steps" class="steps"></ol><p id="empty" class="empty">기록한 동작이 여기에 표시됩니다.</p><div class="actions compact"><button id="download" class="text-button" disabled>기록 파일 저장</button><button id="clear" class="text-button" disabled>현재 기록 지우기</button></div><p class="hint">입력값을 확인하고 전달하지 않을 단계는 삭제하세요. 비밀번호·인증번호는 기록하지 않습니다.</p></details>
+      </section>
+      <section class="step-panel" aria-labelledby="agent-title"><p class="eyebrow">3 · 에이전트에게 전달</p><h2 id="agent-title">원하는 작업을 설명하세요</h2>
+        <label for="goal">어디까지 자동화할까요?<textarea id="goal" rows="3" placeholder="예: 신청서를 열어 값을 입력하고 승인자를 선택한 뒤, 최종 제출 직전에 멈추기"></textarea></label>
+        <label for="variables">실행할 때마다 바꿀 값<textarea id="variables" rows="2" placeholder="예: 날짜, 시작 시간, 종료 시간"></textarea></label>
+        <button id="prompt" class="wide" disabled>에이전트용 지시문 복사</button><p class="hint">복사한 내용을 Codex 또는 Claude Code 채팅에 붙여넣으세요. 저장 위치와 파일 작성 규칙은 자동으로 포함됩니다.</p>
+        <details class="prompt-preview"><summary>전달할 내용 보기</summary><textarea id="preview" rows="10" readonly aria-label="에이전트에게 전달할 내용"></textarea></details>
+      </section>
+      <section class="step-panel" aria-labelledby="finish-title"><p class="eyebrow">4 · 만들어진 매크로 확인</p><h2 id="finish-title">파일이 만들어졌나요?</h2>
+      <div class="section-heading"><p class="hint">파일이 준비되면 아래에 표시됩니다.</p><span id="synced-count" class="pill">0개</span></div>
+      <ul id="synced-scripts" class="synced-scripts"></ul><p id="synced-empty" class="empty">아직 매크로가 없습니다.</p>
+      <div class="actions compact"><button id="sync-folder" class="secondary">파일 반영 확인</button><a class="button-link quiet-link" href="library.html">내 매크로 보기</a></div>
+      <div id="script-origins-section" class="setup-step" hidden><h3>매크로가 사용할 사이트</h3><p class="hint">필요한 주소를 선택해 허용하세요.</p><ul id="script-origins" class="frame-sites"></ul><button id="grant-script-origins" disabled>선택한 사이트 허용</button></div>
+
+        <p class="hint">대상 사이트의 파란 버튼에서 매크로를 실행하세요. 최종 제출은 직접 합니다.</p>
+      </section>
     </div>
     <footer><a href="privacy.html" target="_blank" rel="noopener noreferrer">데이터와 권한</a></footer>
-  </main>
-  <script type="module" src="scripts.js"></script>
-  <script type="module" src="studio.js"></script>
-  <script type="module" src="update.js"></script>
+  </main><script type="module" src="scripts.js"></script><script type="module" src="studio.js"></script><script type="module" src="update.js"></script>
 </body></html>

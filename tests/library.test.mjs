@@ -111,8 +111,8 @@ test('isolated bridge archives only trusted clicks in its launcher and reports w
 test('library screen archives and restores; deletion requires confirmation and a failed save stays recoverable', async () => {
   const { ctx, window, document } = context(await code('extension/ui/library.html'));
   const catalog = [{ id: 'task', name: '<img src=x> 예제', matches: ['https://example.test/*'] }];
-  let state = { ready: true, catalog, archived: [], deleted: [] }, fail = false, approveArchive = false;
-  window.confirm = () => approveArchive;
+  let state = { ready: true, catalog, archived: [], deleted: [] }, fail = false, changed;
+  window.confirm = () => { throw new Error('Reversible archive needs no modal'); };
   const calls = [], dialog = document.getElementById('delete-dialog');
   dialog.showModal = () => { dialog.open = true; }; dialog.close = () => { dialog.open = false; };
   ctx.URL = URL; ctx.chrome = {
@@ -123,20 +123,29 @@ test('library screen archives and restores; deletion requires confirmation and a
         state = { ready: true, ...changeLibrary(state, message.type.slice(8), message.id), catalog };
       }
       return { ok: true, value: structuredClone(state) };
-    } }, storage: { onChanged: { addListener() {} } }
+    } }, storage: { onChanged: { addListener: callback => { changed = callback; } } }
   };
   await vm.runInContext('(async () => {' + await code('extension/ui/library.js') + '\n})()', ctx);
   const buttons = list => [...document.querySelectorAll(list + ' button')];
   assert.equal(document.querySelector('#active-scripts img'), null, 'Script names are rendered as text');
-  buttons('#active-scripts')[0].click(); await tick();
-  assert.equal(document.querySelector('#active-count').textContent, '1개');
-  assert.equal(calls.filter(call => call.type === 'scripts:archive').length, 0);
-  approveArchive = true;
+  const card = document.querySelector('#active-scripts li');
+  changed({ macroStudioLocalScripts: {} }, 'local'); await tick();
+  assert.equal(document.querySelector('#active-scripts li'), card, 'Unchanged state preserves nodes');
+  const search = document.querySelector('#script-search');
+  search.value = 'missing'; search.dispatchEvent(new window.Event('input'));
+  assert.equal(card.hidden, true); assert.equal(document.querySelector('#search-empty').hidden, false);
+  search.value = 'example.test'; search.dispatchEvent(new window.Event('input'));
+  assert.equal(card.hidden, false);
+  search.value = ''; search.dispatchEvent(new window.Event('input'));
   buttons('#active-scripts')[0].click(); await tick();
   assert.equal(document.querySelector('#active-count').textContent, '0개');
-  buttons('#archived-scripts')[0].click(); await tick();
+  assert.equal(document.querySelector('#undo-archive').hidden, false);
+  document.querySelector('#undo-archive').click(); await tick();
   assert.equal(document.querySelector('#active-count').textContent, '1개');
   buttons('#active-scripts')[0].click(); await tick();
+  document.querySelector('#archived-tab').click();
+  assert.equal(document.querySelector('#active-panel').hidden, true);
+  assert.equal(document.querySelector('#archived-panel').hidden, false);
   buttons('#archived-scripts')[1].click();
   assert.equal(dialog.open, true); assert.equal(calls.filter(call => call.type === 'scripts:delete').length, 0);
   document.querySelector('#cancel-delete').click(); assert.equal(dialog.open, false);

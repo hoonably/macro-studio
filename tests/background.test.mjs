@@ -13,7 +13,7 @@ import { createBuildUpdater, LOADED_BUILD_KEY } from '../extension/core/build-up
 import { UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, availableVersion } from '../extension/core/update-notices.js';
 // Most recorder tests model a site the user has already enabled. First-run/reset tests pass local: {}.
 async function worker({ local = { [SITES_KEY]: { 'https://example.test': true } }, origins = ['https://example.test/*'], permissions = [],
-  stored = {}, storeBuild = false,
+  stored = {}, storeBuild = false, navigationEvent = true,
   frames = [{ frameId: 0, url: 'https://example.test/form' }], catalog = [
   { id: 'weekly-task', name: '주간 작업', matches: ['https://example.test/*'] },
   { id: 'other-task', name: '다른 작업', matches: ['https://other.test/*'] }
@@ -32,8 +32,8 @@ async function worker({ local = { [SITES_KEY]: { 'https://example.test': true } 
       local: { get: async key => ({ [key]: structuredClone(local[key]) }), set: async value => Object.assign(local, structuredClone(value)), remove: async keys => { for (const key of [].concat(keys)) delete local[key]; } } },
     permissions: { remove: async value => { calls.push(['remove-permissions', value]); return true; }, getAll: async () => ({ origins, permissions }), contains: async query =>
       (query.origins || []).every(item => origins.some(pattern => matchesSite(pattern, item))) &&
-      (query.permissions || []).every(item => permissions.includes(item)), onAdded: event(), onRemoved: { addListener: value => removed.push(value) } },
-    webNavigation: { getAllFrames: async () => structuredClone(frames) },
+      (query.permissions || []).every(item => permissions.includes(item)), onAdded: { addListener: value => { (lifecycle.added ||= []).push(value); } }, onRemoved: { addListener: value => removed.push(value) } },
+    webNavigation: { onCompleted: navigationEvent ? { addListener: callback => { lifecycle.navigation = callback; } } : undefined, getAllFrames: async () => structuredClone(frames) },
     scripting: { getRegisteredContentScripts: async () => [], registerContentScripts: async value => calls.push(['register', value]),
       executeScript: async value => calls.push(['inject', value]) },
     tabs: { get: async id => ({ id, url: 'https://example.test/form' }), query: async () => [{ id: 42, url: 'https://example.test/form' }], sendMessage: async (...args) => calls.push(['send', args]),
@@ -431,4 +431,21 @@ test('build changes defer only during active work, then reload without deleting 
   assert.equal(env.local[LOADED_BUILD_KEY], '0'.repeat(64));
   assert.ok(env.calls.some(call => call[0] === 'extension-message' && call[1].type === 'update:prepare'));
   assert.match((await env.send({ type: 'recording:start', tabId: 42 })).error, /업데이트/);
+});
+
+test('frame navigation publishes a tab-only notification without scanning or granting permissions', async () => {
+  const env = await worker({ permissions: ['webNavigation'] });
+  env.lifecycle.navigation({ tabId: 42, url: 'https://private.test/?token=secret', frameId: 7 });
+  assert.deepEqual(JSON.parse(JSON.stringify(env.calls.filter(call => call[0] === 'extension-message'))), [['extension-message', { type: 'frames:changed', tabId: 42 }]]);
+  env.lifecycle.navigation({ tabId: -1 });
+  assert.equal(env.calls.filter(call => call[0] === 'extension-message').length, 1);
+});
+
+test('granting the optional navigation API installs its listener once without needing a restart', async () => {
+  const env = await worker({ navigationEvent: false });
+  let count = 0;
+  env.chrome.webNavigation.onCompleted = { addListener: () => { count++; } };
+  await Promise.all(env.lifecycle.added.map(listener => listener()));
+  await Promise.all(env.lifecycle.added.map(listener => listener()));
+  assert.equal(count, 1);
 });

@@ -2,8 +2,15 @@ import { scriptsLocation } from '../scripts/directory.js';
 import { readLocal, writeLocal } from '../scripts/store.js';
 import { folderReady, normalizeFolderPath, scriptsPath } from '../core/script-setup.js';
 const $ = selector => document.querySelector(selector);
-let folder = await readLocal('folder'), folderEpoch = await readLocal('resetEpoch'), state = null, pending = false, signature = '';
+let folder = await readLocal('folder'), folderEpoch = await readLocal('resetEpoch'), state = null, signature = '';
 let siteReadiness = null, setupSignature = '', pathDirty = false, editingPath = false;
+let refreshing = null, refreshAgain = false;
+const rendered = new Map();
+function changed(key, value) {
+  const signature = JSON.stringify(value);
+  if (rendered.get(key) === signature) return false;
+  rendered.set(key, signature); return true;
+}
 const checked = new Set();
 const say = (message, error = false) => { $('#script-state').textContent = message; $('#script-state').dataset.error = String(error); };
 async function request(type, payload = {}) {
@@ -23,45 +30,62 @@ function render(next) {
     { title: '스크립트 실행', ready: !!next.enabled, detail: next.enabled ? 'Chrome 실행 허용 완료' : 'Chrome 설정에서 한 번 허용하세요' },
     { title: '사이트 접근', ready: baseReady && site.ready, detail: baseReady ? site.detail : '앞의 두 단계를 완료하면 설정할 수 있습니다' }
   ];
+  if (!$('#site-setup')) readiness.pop();
   const checklist = $('#setup-checklist');
-  if (checklist) {
+  if (checklist && changed('checklist', readiness)) {
     checklist.replaceChildren();
     readiness.forEach((item, index) => {
       const row = document.createElement('li'), marker = document.createElement('span'), copy = document.createElement('div'), title = document.createElement('strong'), detail = document.createElement('small');
       row.dataset.ready = String(!!item.ready); marker.className = 'setup-marker'; marker.textContent = item.ready ? '✓' : String(index + 1); marker.setAttribute('aria-hidden', 'true');
-      title.textContent = item.title + (item.ready ? ' · 완료' : ''); detail.textContent = item.detail;
+      title.textContent = item.title; detail.textContent = item.detail;
       copy.append(title, detail); row.append(marker, copy); checklist.append(row);
     });
   }
-  $('#script-permission-setup').hidden = !next.connected || next.enabled;
-  $('#script-settings').disabled = !readyFolder || pending;
-  $('#apply-script-settings').disabled = !readyFolder || pending;
-  $('#folder-path').disabled = !next.connected || pending;
-  $('#save-folder-path').disabled = !next.connected || pending;
+  $('#script-permission-setup').hidden = !readyFolder || next.enabled;
+  $('#folder-step').hidden = readyFolder && !editingPath;
+  $('#folder-step h2').textContent = !next.connected ? '매크로를 저장할 폴더를 선택하세요' : !next.readable ? '폴더 읽기를 다시 허용하세요' : editingPath ? '저장 경로 변경' : '저장 위치를 한 번 확인하세요';
+  $('#connection-settings').hidden = !next.connected;
+  $('#setup-result').textContent = baseReady && (!$('#site-setup') || site.ready) ? '준비 완료' : '설정 필요';
+  $('#script-settings').disabled = !readyFolder;
+  $('#apply-script-settings').disabled = !readyFolder;
+  $('#folder-path').disabled = !next.connected;
+  $('#save-folder-path').disabled = !next.connected;
   $('#folder-path-setup').hidden = !next.connected || (confirmedPath && !editingPath);
   $('#folder-location').hidden = !next.connected || !confirmedPath;
-  $('#edit-folder-path').disabled = pending;
+  $('#edit-folder-path').disabled = false;
   $('#edit-folder-path').textContent = editingPath ? '경로 수정 닫기' : '경로 수정';
   if (!pathDirty) $('#folder-path').value = next.folderPath || '';
   $('#folder-path-status').textContent = pathDirty ? '변경한 경로는 확인 버튼을 누른 뒤 사용합니다.' : confirmedPath ? '저장 경로 확인 완료' : '선택한 폴더의 전체 경로를 붙여넣고 확인하세요.';
   $('#script-target').textContent = confirmedPath ? scriptsPath(next.folderPath, next.folderRelativePath) : '';
-  if ($('#site-setup')) $('#site-setup').hidden = !baseReady;
-  $('#connect-folder').disabled = pending || typeof window.showDirectoryPicker !== 'function';
-  $('#connect-folder').textContent = next.connected ? '다른 폴더 연결' : '스크립트 폴더 연결';
+  if ($('#site-setup')) {
+    $('#site-setup').hidden = !baseReady;
+    $('#site-options').hidden = !baseReady;
+    if (changed('site-ready', site.ready)) $('#site-options').open = !site.ready;
+    $('#site-options > summary').textContent = site.ready ? '사이트 설정' : '사이트 접근 완료하기';
+    $('#site-summary').hidden = !baseReady || !site.ready;
+    $('#site-summary').textContent = site.ready ? site.detail : '';
+  }
+  $('#connect-folder').disabled = typeof window.showDirectoryPicker !== 'function';
+  $('#connect-folder').hidden = next.connected && next.readable;
+  $('#connect-folder').textContent = next.connected ? '다른 폴더 선택' : '폴더 선택';
+  $('#change-folder').disabled = $('#connect-folder').disabled;
   $('#grant-folder').hidden = !next.connected || next.readable;
-  $('#grant-folder').disabled = pending;
+  $('#grant-folder').disabled = false;
   $('#disconnect-folder').hidden = !next.connected;
-  $('#disconnect-folder').disabled = $('#sync-folder').disabled = pending;
-  $('#sync-folder').textContent = next.connected ? '지금 동기화' : '다시 확인';
-  if (!next.connected && !next.count) say('먼저 개인 매크로를 저장할 사용 폴더를 연결하세요. 비어 있는 폴더도 사용할 수 있습니다.');
-  else if (!next.enabled) say('폴더는 연결됐습니다. 아래에서 Chrome 실행 허용을 한 번 켜면 준비가 끝납니다.');
-  else if (next.connected && !next.readable) say('폴더 읽기 권한을 다시 허용하면 동기화가 이어집니다.');
-  else if (next.error) say(next.error + '\n' + next.message, true);
-  else if (next.connected) say(next.folderName + ' · ' + next.count + '개 · ' + (next.message || '자동 동기화 중'));
-  else say(next.count ? '자동 동기화가 꺼져 있습니다. 마지막으로 가져온 ' + next.count + '개는 계속 사용할 수 있습니다.' : '스크립트 폴더를 연결하면 준비가 끝납니다.');
-  $('#sync-detail').textContent = next.syncedAt ? '마지막 반영: ' + new Date(next.syncedAt).toLocaleString() : '';
-  $('#sync-errors').replaceChildren();
-  for (const error of [...(next.errors || []), ...(next.runtimeErrors || [])]) { const li = document.createElement('li'); li.textContent = error.id + ' · ' + error.message; $('#sync-errors').append(li); }
+  $('#disconnect-folder').disabled = $('#sync-folder').disabled = false;
+  $('#sync-folder').textContent = '파일 반영 확인';
+  if (next.connected && !next.readable) say('폴더 읽기 권한을 다시 허용하세요.');
+  else if (next.error) say(next.error, true);
+  else if (!next.connected) say(next.count ? '연결 중지됨 · 마지막으로 가져온 ' + next.count + '개는 계속 사용할 수 있습니다.' : '폴더부터 선택해 주세요.');
+  else if (!confirmedPath) say(next.folderName + ' 선택됨 · 아래에서 저장 경로를 확인하세요.');
+  else if (!next.enabled) say('Chrome 실행 허용을 완료하세요.');
+  else say('사용 폴더 연결 완료 · ' + next.count + '개');
+  $('#sync-detail').textContent = next.syncedAt ? '파일 반영: ' + new Date(next.syncedAt).toLocaleString() : '';
+  const errors = [...(next.errors || []), ...(next.runtimeErrors || [])];
+  if (changed('errors', errors)) {
+    $('#sync-errors').replaceChildren();
+    for (const error of errors) { const li = document.createElement('li'); li.textContent = error.id + ' · ' + error.message; $('#sync-errors').append(li); }
+  }
   const origins = next.missingOrigins || [];
   $('#script-origins-section').hidden = !origins.length || !baseReady;
   if (JSON.stringify(origins) !== signature) {
@@ -76,10 +100,12 @@ function render(next) {
   }
   $('#synced-count').textContent = next.count + '개';
   $('#synced-empty').hidden = !!next.count;
-  $('#synced-scripts').replaceChildren();
-  for (const script of next.scripts || []) {
-    const li = document.createElement('li'), name = document.createElement('strong'), sites = document.createElement('small');
-    name.textContent = script.name; sites.textContent = script.matches.join(' · '); li.append(name, sites); $('#synced-scripts').append(li);
+  if (changed('scripts', next.scripts || [])) {
+    $('#synced-scripts').replaceChildren();
+    for (const script of next.scripts || []) {
+      const li = document.createElement('li'), name = document.createElement('strong'), sites = document.createElement('small');
+      name.textContent = script.name; sites.textContent = script.matches.join(' · '); li.append(name, sites); $('#synced-scripts').append(li);
+    }
   }
   permissionsControl();
   const detail = { ...next, folderReady: readyFolder };
@@ -96,16 +122,25 @@ document.addEventListener('macro-studio:site-readiness', event => {
   if (state) render(state);
 });
 function permissionsControl() {
-  $('#grant-script-origins').disabled = pending || !folderReady(state) || !state.enabled || !(state?.missingOrigins || []).some(origin => checked.has(origin));
-  for (const input of $('#script-origins').querySelectorAll('input')) input.disabled = pending;
+  $('#grant-script-origins').disabled = !folderReady(state) || !state.enabled || !(state?.missingOrigins || []).some(origin => checked.has(origin));
+  for (const input of $('#script-origins').querySelectorAll('input')) input.disabled = false;
 }
 async function refresh(sync = false) {
-  if (pending) return;
-  pending = true; if (state) render(state);
-  let failure = '';
-  try { folder = await readLocal('folder'); folderEpoch = await readLocal('resetEpoch'); render(await request(sync ? 'local:sync' : 'local:status')); }
-  catch (error) { failure = error.message; }
-  finally { pending = false; if (state) render(state); else $('#connect-folder').disabled = typeof window.showDirectoryPicker !== 'function'; if (failure) say(failure, true); }
+  if (refreshing) { refreshAgain ||= sync; return refreshing; }
+  refreshing = (async () => {
+    do {
+      refreshAgain = false;
+      try {
+        folder = await readLocal('folder'); folderEpoch = await readLocal('resetEpoch');
+        render(await request(sync ? 'local:sync' : 'local:status'));
+      } catch (error) {
+        $('#connect-folder').disabled = typeof window.showDirectoryPicker !== 'function';
+        say(error.message, true);
+      }
+      sync = refreshAgain;
+    } while (refreshAgain);
+  })();
+  try { await refreshing; } finally { refreshing = null; }
 }
 $('#script-settings').addEventListener('click', () => chrome.tabs.create({ url: 'chrome://extensions/?id=' + chrome.runtime.id }));
 async function reloadExtension() {
@@ -127,7 +162,7 @@ async function reloadExtension() {
 }
 $('#apply-script-settings').addEventListener('click', () => refresh(true));
 $('#reload-extension').addEventListener('click', reloadExtension);
-$('#connect-folder').addEventListener('click', async () => {
+async function connectFolder() {
   // Keep the picker in the actual user gesture. Retain only the directory chosen by the user.
   try {
     const selectedEpoch = folderEpoch;
@@ -141,7 +176,9 @@ $('#connect-folder').addEventListener('click', async () => {
     folder = selected; pathDirty = false; editingPath = false;
     await refresh(true);
   } catch (error) { if (error.name !== 'AbortError') say(error.message, true); }
-});
+}
+$('#connect-folder').addEventListener('click', connectFolder);
+$('#change-folder').addEventListener('click', connectFolder);
 $('#folder-path').addEventListener('input', () => { pathDirty = true; $('#folder-path-status').textContent = '변경한 경로는 확인 버튼을 누른 뒤 사용합니다.'; });
 $('#edit-folder-path').addEventListener('click', () => {
   editingPath = !editingPath; pathDirty = false;
@@ -168,11 +205,16 @@ $('#sync-folder').addEventListener('click', () => refresh(true));
 $('#disconnect-folder').addEventListener('click', async () => { await writeLocal({ folder: undefined, folderPath: undefined }); folder = null; pathDirty = false; editingPath = false; await refresh(true); });
 $('#grant-script-origins').addEventListener('click', async () => {
   const origins = (state?.missingOrigins || []).filter(origin => checked.has(origin));
-  if (!origins.length || pending) return;
+  if (!origins.length) return;
   const permission = chrome.permissions.request({ origins });
   try { if (!await permission) throw new Error('사이트 접근이 허용되지 않았습니다.'); await refresh(true); }
   catch (error) { say(error.message, true); }
 });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') refresh(true); });
-setInterval(() => { if (document.visibilityState !== 'hidden') refresh(true); }, 2000);
+window.addEventListener('focus', () => refresh(true));
+chrome.storage.onChanged?.addListener((changes, area) => {
+  if (area === 'local' && changes.macroStudioLocalScripts) refresh();
+});
+chrome.permissions.onAdded?.addListener(() => refresh(true));
+chrome.permissions.onRemoved?.addListener(() => refresh(true));
 await refresh(true);
