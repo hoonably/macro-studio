@@ -52,7 +52,7 @@ test('prompt distinguishes inferred and legacy manual hints from user instructio
   assert.match(prompt, /modeSource=automatic은 버튼 문구에 따른 참고 분류/);
   assert.match(prompt, /modeSource=legacy는 분류 출처가 없는 과거 기록/);
   assert.match(prompt, /modeSource=user의 mode=manual 및 사용자가 직접 명시한 수동 단계는 실행하지 마/);
-  assert.match(prompt, /docs\/unist\.md/);
+  assert.match(prompt, /결재선 선택 창을 여는 것과 최종 결재상신/);
   assert.match(prompt, /실제 최종 제출·최종 결재상신은 자동 실행하지 마/);
   assert.doesNotMatch(prompt, /mode=manual 단계 및 최종 제출은 자동 실행하지 마/);
 });

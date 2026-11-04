@@ -16,17 +16,6 @@ async function walk(directory) {
 }
 const files = await walk(projectRoot);
 for (const file of files.filter(file => /\.(?:m?js)$/.test(file))) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
-let privateConfig;
-try { privateConfig = JSON.parse(await fs.readFile(path.join(projectRoot, 'local/profiles/unist-travel.json'), 'utf8')); }
-catch (error) { if (error.code !== 'ENOENT') throw error; }
-if (privateConfig) {
-  const values = ['name', 'purpose', 'memo', 'approvalLine', 'organization'].map(key => privateConfig[key])
-    .concat(privateConfig.approvers || []).filter(value => typeof value === 'string' && value.length >= 2);
-  for (const file of files.filter(file => /\.(?:m?js|json|md|txt|yml)$/.test(file))) {
-    const content = await fs.readFile(file, 'utf8');
-    if (values.some(value => content.includes(value))) throw new Error('개인 설정값이 공개 소스에 들어 있습니다: ' + path.relative(projectRoot, file));
-  }
-}
 for (const file of files.filter(file => file.endsWith('.md'))) {
   const content = await fs.readFile(file, 'utf8');
   for (const match of content.matchAll(/\]\(([^)]+)\)/g)) {
@@ -35,4 +24,4 @@ for (const file of files.filter(file => file.endsWith('.md'))) {
     await fs.access(target).catch(() => { throw new Error('문서 링크가 없습니다: ' + path.relative(projectRoot, file) + ' → ' + match[1]); });
   }
 }
-console.log('Checked JavaScript syntax, documentation links, and separation of personal preset values.');
+console.log('Checked JavaScript syntax and documentation links.');

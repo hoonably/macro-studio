@@ -190,30 +190,30 @@ test('subframe injection failures leave the main recording running, but top-fram
   assert.equal(env.state.macroStudioRecording.status, 'error');
 });
 test('script archive persists across workers and sites; only the library can restore or delete registered scripts', async () => {
-  const options = { local: {}, catalog: [{ id: 'unist-travel', name: '출장 예제', matches: [
-    'https://portal.unist.ac.kr/irj/portal*', 'https://s4hana.unist.ac.kr/sap/*'
+  const options = { local: {}, catalog: [{ id: 'sample-task', name: 'Sample task', matches: [
+    'https://portal.example.test/irj/portal*', 'https://erp.example.test/sap/*'
   ] }, { id: 'other-task', name: '다른 작업', matches: ['https://other.test/*'] }] };
   let env = await worker(options);
-  const portal = { ...env.content, url: 'https://portal.unist.ac.kr/irj/portal' };
-  const sap = { ...env.content, url: 'https://s4hana.unist.ac.kr/sap/bc/webdynpro/sap/ZHRW3218' };
+  const portal = { ...env.content, url: 'https://portal.example.test/irj/portal' };
+  const sap = { ...env.content, url: 'https://erp.example.test/sap/bc/webdynpro/sap/SAMPLE_APP' };
   assert.equal((await env.send({ type: 'scripts:archive', id: 'other-task' }, portal)).ok, false);
   assert.equal((await env.send({ type: 'scripts:archive', id: 'missing' })).ok, false);
-  assert.equal((await env.send({ type: 'scripts:archive', id: 'unist-travel' }, { ...portal, id: 'other-extension' })).ok, false);
-  assert.ok((await env.send({ type: 'scripts:archive', id: 'unist-travel' }, portal)).ok);
-  assert.equal((await env.send({ type: 'scripts:state' }, sap)).value.archived[0], 'unist-travel');
+  assert.equal((await env.send({ type: 'scripts:archive', id: 'sample-task' }, { ...portal, id: 'other-extension' })).ok, false);
+  assert.ok((await env.send({ type: 'scripts:archive', id: 'sample-task' }, portal)).ok);
+  assert.equal((await env.send({ type: 'scripts:state' }, sap)).value.archived[0], 'sample-task');
   assert.equal((await env.send({ type: 'scripts:state' }, portal)).value.catalog, undefined);
   env = await worker(options);
-  assert.equal((await env.send({ type: 'scripts:state' }, sap)).value.archived[0], 'unist-travel');
-  for (const type of ['scripts:restore', 'scripts:delete']) assert.equal((await env.send({ type, id: 'unist-travel' }, portal)).ok, false);
-  assert.ok((await env.send({ type: 'scripts:restore', id: 'unist-travel' })).ok);
+  assert.equal((await env.send({ type: 'scripts:state' }, sap)).value.archived[0], 'sample-task');
+  for (const type of ['scripts:restore', 'scripts:delete']) assert.equal((await env.send({ type, id: 'sample-task' }, portal)).ok, false);
+  assert.ok((await env.send({ type: 'scripts:restore', id: 'sample-task' })).ok);
   assert.equal(options.local[LIBRARY_KEY].archived.length, 0);
-  assert.equal((await env.send({ type: 'scripts:delete', id: 'unist-travel' })).ok, false);
-  await env.send({ type: 'scripts:archive', id: 'unist-travel' });
-  const deleted = await env.send({ type: 'scripts:delete', id: 'unist-travel' });
-  assert.ok(deleted.ok); assert.ok(!deleted.value.catalog.some(script => script.id === 'unist-travel'));
+  assert.equal((await env.send({ type: 'scripts:delete', id: 'sample-task' })).ok, false);
+  await env.send({ type: 'scripts:archive', id: 'sample-task' });
+  const deleted = await env.send({ type: 'scripts:delete', id: 'sample-task' });
+  assert.ok(deleted.ok); assert.ok(!deleted.value.catalog.some(script => script.id === 'sample-task'));
   env = await worker(options);
-  assert.equal((await env.send({ type: 'scripts:state' }, portal)).value.deleted[0], 'unist-travel');
-  assert.equal((await env.send({ type: 'scripts:restore', id: 'unist-travel' })).ok, false);
+  assert.equal((await env.send({ type: 'scripts:state' }, portal)).value.deleted[0], 'sample-task');
+  assert.equal((await env.send({ type: 'scripts:restore', id: 'sample-task' })).ok, false);
 });
 test('failed library writes leave scripts available and concurrent changes preserve both items', async () => {
   const env = await worker();
@@ -356,9 +356,9 @@ test('reset preview is read-only and only an explicit own reset-page confirmatio
   assert.equal(env.local.macroStudioLocalScripts, undefined, 'An idle sync must not restore deleted sync state');
 });
 
-test('bundled UNIST sites stay OFF on a fresh install and after reset despite retained host permissions', async () => {
-  const origins = ['https://portal.unist.ac.kr/*', 'https://s4hana.unist.ac.kr/*'];
-  const catalog = [{ id: 'unist-travel', name: '출장 예제', matches: origins }];
+test('bundled script sites stay OFF on a fresh install and after reset despite retained host permissions', async () => {
+  const origins = ['https://portal.example.test/*', 'https://erp.example.test/*'];
+  const catalog = [{ id: 'sample-task', name: 'Sample task', matches: origins }];
   for (const origin of origins.map(pattern => pattern.slice(0, -2))) {
     const options = { origins, catalog, local: {} };
     let env = await worker(options);
@@ -373,7 +373,7 @@ test('bundled UNIST sites stay OFF on a fresh install and after reset despite re
       assert.equal(popup.allowed, true, 'Permission alone does not imply site opt-in');
       assert.equal(popup.enabled, false);
       const page = (await env.send({ type: 'scripts:state' }, sender)).value;
-      assert.ok(page.available.includes('unist-travel'), 'The bundled example is still present');
+      assert.ok(page.available.includes('sample-task'), 'The bundled example is still present');
       assert.equal(page.siteEnabled, false, 'The launcher stays hidden');
       assert.match((await env.send({ type: 'recording:start', tabId: 42 })).error, /ON/);
       assert.match((await env.send({ type: 'studio:activate', tabId: 42, origin })).error, /ON/);
@@ -391,7 +391,7 @@ test('bundled UNIST sites stay OFF on a fresh install and after reset despite re
     await assertOff();
     assert.equal((await env.send({ type: 'site:set', tabId: 42, origin, enabled: true })).value.enabled, true);
     assert.equal((await env.send({ type: 'scripts:state' })).value.catalog.length, 0, 'Enabling the site after restart must not restore the deleted example');
-    assert.ok((await env.send({ type: 'scripts:state' }, sender)).value.deleted.includes('unist-travel'));
+    assert.ok((await env.send({ type: 'scripts:state' }, sender)).value.deleted.includes('sample-task'));
   }
 });
 

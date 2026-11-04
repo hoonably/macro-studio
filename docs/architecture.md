@@ -1,20 +1,20 @@
 # 구조와 확장 지점
 
-## 세 가지 경계
+## 구성 경계
 
 | 계층 | 위치 | 역할 |
 |---|---|---|
 | 공통 실행·UI | `extension/` | 아이콘, 설정, 진행 상태, DOM/SAP 어댑터, 기록기 |
-| 개발용 예제 | `profiles/`, `scripts/examples/` | 페이지 범위·프레임 연결·흐름의 참고 소스, 기본 설치 제외 |
+| 생성 템플릿 | `templates/script/` | 개인 매크로의 최소 등록 구조 |
 | 개인 작업 | `local/` | 실제 입력값, 결재자, 개인 매크로, 캡처 |
 
-`tools/build.mjs`가 실행 목록과 manifest를 만든다. 새 설치의 목록과 사이트 권한은 비어 있으며 UNIST 예제도 자동 등록하지 않는다. 개인 빌드에만 `local/scripts/`의 활성 스크립트와 해당 사이트 범위를 포함한다. 개인 스크립트 폴더를 연결하면 `scripts/runtime.js`가 그 폴더의 변경을 별도로 등록한다. 개인 스크립트만 변경하면 확장 새로고침이 필요 없다. 공통 확장·manifest 변경도 빌드 완료를 감지해 자동 적용한다.
+`tools/build.mjs`가 실행 목록과 manifest를 만든다. 새 설치의 목록과 사이트 권한은 비어 있다. 특정 기관의 업무 매크로는 기본 제공하지 않는다. 개인 빌드에만 `local/scripts/`의 활성 스크립트와 해당 사이트 범위를 포함한다. 개인 스크립트 폴더를 연결하면 `scripts/runtime.js`가 그 폴더의 변경을 별도로 등록한다. 개인 스크립트만 변경하면 확장 새로고침이 필요 없다. 공통 확장·manifest 변경도 빌드 완료를 감지해 자동 적용한다.
 
 공통 네임스페이스는 `window.MacroStudio`이다. `features`는 사이트 기능, `launcher`는 스크립트 등록 UI, `dom`·`sap`는 입력 어댑터다. content script의 world마다 별도 네임스페이스가 있다.
 
 ## 실행 world
 
-일반 개인 매크로는 ISOLATED world를 사용한다. SAP 기본 API가 필요한 UNIST 기능은 MAIN world를 사용한다. MAIN world는 사이트와 JavaScript 환경을 공유하므로 비밀 정보나 확장 권한을 두지 않는다.
+일반 개인 매크로는 ISOLATED world를 사용한다. SAP 기본 API를 사용하는 개인 매크로는 MAIN world를 사용한다. MAIN world는 사이트와 JavaScript 환경을 공유하므로 비밀 정보나 확장 권한을 두지 않는다.
 
 도구모음은 `action.default_popup`의 `ui/popup.html`을 열며 `openPanelOnActionClick`은 꺼져 있다. 팝업은 현재 사이트 ON/OFF와 폴더 관리 진입만 제공한다. 권한이 필요한 기록·내보내기는 확장 사이드패널과 서비스 워커가 처리한다. 사이트 안의 ‘새 자동화 만들기’ 버튼은 ISOLATED listener가 실제 사용자 클릭을 확인한 뒤 사이드패널을 연다. 사이트의 `postMessage`로 임의의 코드 실행이나 AI 인증을 요청하는 기능은 없다.
 
@@ -34,7 +34,7 @@ MAIN world에는 DOM 이벤트로 표시 상태만 전달한다. 이 이벤트�
 
 `scripts/directory.js`는 사용자가 선택한 폴더 바로 아래, 또는 정해진 `local/scripts`·`scripts` 위치의 `script.json`과 명시한 `.js`만 읽는다. 빈 폴더도 연결하며 매 동기화에서 알려진 하위 위치를 다시 확인한다. 폴더 핸들과 원본·컴파일된 코드의 정상 스냅샷은 확장 IndexedDB에 저장한다. 공개 저장소와 페이지의 저장소에는 쓰지 않는다. `chrome.storage.local`에는 목록 갱신용 revision·개수·오류 상태만 전달한다.
 
-Chrome `userScripts`에 코드를 등록·갱신하고, 허용된 현재 페이지에도 주입한다. 공통 런처를 사용자 코드에 일시적으로 대신 제공해 UI 정의와 `run`을 수집한다. 코드 자체는 해당 MAIN 또는 USER_SCRIPT world에 유지하고 UI의 데이터만 공통 런처에 전달한다. 이미 로드된 공통 MAIN 기능은 프로토타입을 통해 재사용할 수 있지만, UNIST 예제 기능은 기본 로드되지 않는다. 개인 feature 설정은 별도 객체에 둔다.
+Chrome `userScripts`에 코드를 등록·갱신하고, 허용된 현재 페이지에도 주입한다. 공통 런처를 사용자 코드에 일시적으로 대신 제공해 UI 정의와 `run`을 수집한다. 코드 자체는 해당 MAIN 또는 USER_SCRIPT world에 유지하고 UI의 데이터만 공통 런처에 전달한다. 이미 로드된 공통 MAIN 기능은 프로토타입을 통해 재사용할 수 있다. 사이트별 업무 기능은 개인 매크로가 명시적으로 구현한다. 개인 feature 설정은 별도 객체에 둔다.
 
 런처의 실제 submit 이벤트를 ISOLATED listener가 shadow root 안에서 확인하고 id·revision·현재 입력값을 검증한 뒤에만 실행 요청을 보낸다. 워커도 tab·frame·사이트 범위·현재 revision·보관·삭제 상태를 검사한다. 진행 결과를 돌려주는 DOM 이벤트는 표시 용도다. 사용자 스크립트에 확장 API 메시징을 열지 않는다.
 
@@ -62,13 +62,13 @@ Chrome `userScripts`에 코드를 등록·갱신하고, 허용된 현재 페이�
 
 - `build`: 공통 확장 + 활성화된 `local/scripts/*/script.json` → `dist/`
 - `build:public`: 공통 확장만, 스크립트 목록은 빈 배열 → `dist-public/`
-- `profiles/`, `scripts/examples/`, 과거의 `local/profiles/unist-travel.json`은 빌드가 읽거나 자동 등록하지 않는다.
+- `local/scripts/*/script.json`에 명시되지 않은 개인 설정이나 별도 파일은 자동 등록하지 않는다.
 - 공유 빌드는 개인 디렉터리를 읽지 않는다.
 - staging 폴더에서 파일을 확인한 뒤 output을 교체한다. 파일 내용의 SHA-256 식별자를 `core/build-info.json`에 쓰고, 검증이 끝난 staging만 output으로 교체한다. 같은 내용의 빌드는 식별자가 같다.
 
 서비스 워커는 현재 로드한 빌드 식별자를 보존하고, 캐시 없이 읽은 완료 빌드와 비교한다. 자체 UI의 2초 확인과 30초 알람이 같은 직렬 경로를 사용한다. 기록 중이거나 사용자 코드 실행 중이면 미루며, 적용 직전 새 실행을 잠그고 진행 중인 동기화·연결을 마친다. 런처의 실행 상태도 확인한다. 작성 중인 설명을 저장시킨 뒤 기록·설명을 IndexedDB에 임시 체크포인트로 보관한다. Chrome이 재로드 때 세션 저장소를 비우므로 새 워커는 요청 처리 전에 이를 복원하고 체크포인트를 제거한다. 같은 빌드의 중복 적용과 빌드 중간의 누락·잘못된 마커는 무시한다. 사이트의 폼을 잃지 않도록 웹페이지 자체를 새로고침하지 않는다.
 
-새 작업은 실제 진입점과 로드 순서를 검증해서 `local/scripts/<id>/script.json`에 명시한다. 참고용 사이트 프로필을 추가해도 빌드에 자동 포함되지 않는다.
+새 작업은 실제 진입점과 로드 순서를 검증해서 `local/scripts/<id>/script.json`에 명시한다. 공통 SAP API와 프레임 경계는 [SAP 어댑터 안내](sap-adapter.md)를 참고한다.
 
 ## AI 연결 경계
 

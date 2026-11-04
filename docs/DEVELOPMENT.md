@@ -40,7 +40,7 @@ Chrome이 계속 읽으므로 저장소와 `dist`를 임시 위치로 옮기거�
 | `extension/scripts/` | 사용자가 연결한 폴더와 개인 코드 등록 |
 | `extension/adapters/` | 일반 DOM·SAP 어댑터 |
 | `local/scripts/` | 개인 매크로·설정, Git 제외 |
-| `scripts/examples/`, `profiles/` | 개발용 참고 소스, 기본 빌드 제외 |
+| `templates/script/` | 새 개인 매크로의 최소 등록 템플릿 |
 | `tests/`, `tools/` | 오프라인 검증과 빌드 도구 |
 
 생성된 `dist`, `dist-public`, `dist-store` 파일을 소스처럼 직접 수정하지 않습니다. 개인 파일·기록·캡처·인증 정보를 공개 소스나 빌드에 포함하지 않습니다.
@@ -53,7 +53,7 @@ npm run new:script -- weekly-task --name "매주 하는 작업" --url https://ex
 
 `local/scripts/weekly-task/`의 템플릿을 실제 작업에 맞게 구현합니다. 연결된 폴더에서는 `script.json`과 명시된 실행 파일만 읽습니다. 새로운 사이트는 사용자가 선택해 허용하며 저장·등록 자체로 작업을 실행하지 않습니다.
 
-UNIST 출장 흐름은 `scripts/examples/unist-travel/`과 [UNIST 안내](unist.md)를 참고합니다. 자동 설치되지 않으며, 실제 개인값과 필요한 파일 순서는 개인 스크립트에 명시합니다. 예제는 관내출장·기타/자비 조합을 기준으로 하고 최종 결재상신 직전에 멈춥니다.
+SAP 개인 매크로는 [공통 SAP 어댑터 안내](sap-adapter.md)를 참고합니다. 사이트별 업무 경로·입력값·파일 순서는 개인 스크립트에 명시하고, 최종 제출 직전에 멈춥니다. 공통 SAP 동작은 `tests/sap.test.mjs`에서 검증합니다.
 
 ## 화면과 알림
 

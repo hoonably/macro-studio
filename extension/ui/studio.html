@@ -59,8 +59,8 @@
     <section>
       <h2>3. 에이전트와 만들기</h2>
       <ol class="agent-guide"><li>아래에 자동화할 순서·중단 지점과 실행마다 바꿀 값을 적습니다.</li><li>‘에이전트용 프롬프트 복사’를 누르고 Codex 또는 Claude Code 채팅에 그대로 붙여넣습니다.</li><li>에이전트가 지시문에 적힌 저장 위치에 파일 두 개를 만들면 여기로 돌아와 자동 반영된 매크로를 확인합니다.</li><li>대상 사이트의 파란 버튼에서 매크로를 실행합니다. 최종 제출은 직접 합니다.</li></ol>
-      <label>무엇을 자동화할까요?<textarea id="goal" rows="4" placeholder="자동화할 작업 순서와 완료할 지점을 적어주세요.&#10;(예: 일반행정 → 국내출장 신청 → 신청 → 값들 입력 → 신규 결재상신 → 확인 → 결재선 목록 선택)"></textarea></label>
-      <label>바뀌는 값<textarea id="variables" rows="2" placeholder="실행할 때마다 바꿀 값을 적어주세요.&#10;(예: 출장일, 출장 시간)"></textarea></label>
+      <label>무엇을 자동화할까요?<textarea id="goal" rows="4" placeholder="자동화할 작업 순서와 완료할 지점을 적어주세요.&#10;(예: 업무 메뉴 → 신청서 열기 → 값 입력 → 승인자 선택 → 최종 제출 직전에 멈춤)"></textarea></label>
+      <label>바뀌는 값<textarea id="variables" rows="2" placeholder="실행할 때마다 바꿀 값을 적어주세요.&#10;(예: 날짜, 시작 시간, 종료 시간)"></textarea></label>
       <div class="prompt-preview"><label for="preview">전달할 내용 보기</label><textarea id="preview" rows="10" readonly aria-label="에이전트에게 전달할 내용"></textarea></div>
       <div class="actions"><button id="prompt" disabled>에이전트용 프롬프트 복사</button><button id="download" class="secondary" disabled>JSON 저장</button></div>
       <p class="hint">지시문에는 확인한 사용 폴더의 전체 경로가 포함됩니다. 에이전트가 다른 작업 폴더에 저장하지 않았는지 완료 메시지의 경로를 확인하세요. 내용은 직접 복사해 전달합니다.</p>

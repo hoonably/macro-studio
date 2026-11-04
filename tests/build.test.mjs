@@ -10,7 +10,7 @@ import { scriptsDirectory, readScripts } from '../extension/scripts/directory.js
 test('a fresh personal build prepares an empty connectable script folder; public builds do not touch local', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'macro-studio-first-run-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  for (const dir of ['extension', 'profiles', 'scripts']) await fs.cp(path.join(projectRoot, dir), path.join(root, dir), { recursive: true });
+  for (const dir of ['extension']) await fs.cp(path.join(projectRoot, dir), path.join(root, dir), { recursive: true });
   await fs.mkdir(path.join(root, 'extension/.gallery'), { recursive: true });
   await fs.writeFile(path.join(root, 'extension/.gallery/gallery.csv'), 'PRIVATE_LOCAL_METADATA');
   const shared = await build({ root, publicOnly: true });
@@ -53,12 +53,14 @@ test('a fresh personal build prepares an empty connectable script folder; public
   assert.equal((await build({ root })).scripts, 0, 'Local gallery indexes are not script folders');
 });
 
-test('builds ignore legacy presets and examples; only explicit personal scripts are bundled', async t => {
+test('builds ignore undeclared settings and reference assets; only explicit personal scripts are bundled', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'macro-studio-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  for (const dir of ['extension', 'profiles', 'scripts', 'templates']) await fs.cp(path.join(projectRoot, dir), path.join(root, dir), { recursive: true });
-  await fs.mkdir(path.join(root, 'local/profiles'), { recursive: true });
-  await fs.writeFile(path.join(root, 'local/profiles/unist-travel.json'), JSON.stringify({ purpose: 'PRIVATE_SENTINEL', name: 'PRIVATE_NAME_SENTINEL' }));
+  for (const dir of ['extension', 'templates']) await fs.cp(path.join(projectRoot, dir), path.join(root, dir), { recursive: true });
+  await fs.mkdir(path.join(root, 'scripts/examples/sample'), { recursive: true });
+  await fs.writeFile(path.join(root, 'scripts/examples/sample/script.js'), 'UNDECLARED_REFERENCE_ASSET');
+  await fs.mkdir(path.join(root, 'local'), { recursive: true });
+  await fs.writeFile(path.join(root, 'local/unregistered.json'), JSON.stringify({ purpose: 'PRIVATE_SENTINEL', name: 'PRIVATE_NAME_SENTINEL' }));
   const script = await newScript({ root, id: 'weekly-task', name: 'Test $& name', url: 'https://example.test/form' });
   assert.ok((await fs.readFile(path.join(script, 'script.js'), 'utf8')).includes('Test $& name'));
   await assert.rejects(newScript({ root, id: 'weekly-task', url: 'https://example.test' }), /EEXIST/);
@@ -97,8 +99,8 @@ test('builds ignore legacy presets and examples; only explicit personal scripts 
   const publicCatalog = JSON.parse(await fs.readFile(path.join(shared.output, 'core/script-catalog.json'), 'utf8'));
   assert.deepEqual(publicCatalog, []);
   assert.ok(!JSON.stringify(publicCatalog).includes('PRIVATE_NAME_SENTINEL'));
-  // Legacy preset files no longer install any script, in either build.
-  await fs.writeFile(path.join(root, 'local/profiles/unist-travel.json'), 'not JSON');
+  // Undeclared settings do not install any script, even if their JSON is incomplete.
+  await fs.writeFile(path.join(root, 'local/unregistered.json'), 'not JSON');
   await build({ root, publicOnly: true });
   await build({ root });
   const metadata = path.join(script, 'script.json');
@@ -107,9 +109,9 @@ test('builds ignore legacy presets and examples; only explicit personal scripts 
   await assert.rejects(build({ root }), /ファイル|파일/);
   malicious.entries[0].files = ['script.js'];
   await fs.writeFile(metadata, JSON.stringify(malicious));
-  await newScript({ root, id: 'unist-travel', name: 'User-created task', url: 'https://example.test' });
+  await newScript({ root, id: 'sample-task', name: 'User-created task', url: 'https://example.test' });
   const explicit = await build({ root });
-  assert.equal(explicit.scripts, 2, 'An example name does not reserve or auto-install an id');
+  assert.equal(explicit.scripts, 2, 'Only explicitly created scripts are installed');
   await fs.rm(path.join(root, 'local/scripts'), { recursive: true });
   const cleaned = await build({ root });
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(cleaned.output, 'core/script-catalog.json'), 'utf8')), []);
