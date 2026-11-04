@@ -89,7 +89,30 @@ test('directory sync reads only declared scripts, validates paths, and keeps the
   assert.throws(() => scriptMetadata({ id: 'task', entries: [{ matches: ['https://example.test/*'], adapters: ['sap'] }] }, 'task'), /MAIN/);
   const root = directory('repository', { local: directory('local', { scripts: dir }) });
   assert.equal(await scriptsDirectory(root), dir);
-  await assert.rejects(scriptsDirectory(directory('unrelated')), /폴더/);
+  const empty = directory('MyMacros');
+  assert.equal(await scriptsDirectory(empty), empty, 'An empty chosen folder can be connected before generation');
+});
+
+test('standalone wrapper folders resolve and new incomplete macros report the missing file', async () => {
+  const task = script('task', source('task')), nested = directory('scripts', { task });
+  assert.equal(await scriptsDirectory(directory('MyMacros', { scripts: nested })), nested);
+  delete task.entries['script.js'];
+  assert.match((await readScripts(nested)).errors[0].message, /script.js/);
+  task.entries['script.js'] = file('script.js', source('task'));
+  delete task.entries['script.json'];
+  assert.match((await readScripts(nested)).errors[0].message, /script.json/);
+  await assert.rejects(scriptsDirectory(script('task', source('task'))), /상위|위의/);
+});
+
+test('a connected empty folder detects a later wrapper and keeps its confirmed path private', async () => {
+  const folder = directory('MyMacros'), env = await runtimeFixture(folder, { folderPath: '/Users/example/MyMacros' });
+  assert.equal((await env.runtime.sync()).count, 0);
+  folder.entries.scripts = directory('scripts', { task: script('task', source('task')) });
+  const state = await env.runtime.sync();
+  assert.equal(state.count, 1);
+  assert.deepEqual(state.folderRelativePath, ['scripts']);
+  assert.equal(state.folderPath, '/Users/example/MyMacros');
+  assert.ok(!JSON.stringify(env.local).includes('/Users/example'), 'The OS path is not broadcast to page-facing storage');
 });
 
 test('source changes register without extension reload, mount on an existing page, and survive a worker restart', async () => {

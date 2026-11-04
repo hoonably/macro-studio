@@ -1,4 +1,4 @@
-import { LOCAL_KEY, originPattern, readScripts } from './directory.js';
+import { LOCAL_KEY, originPattern, readScripts, scriptsLocation } from './directory.js';
 import { readLocal, writeLocal, resetLocal } from './store.js';
 import { compileSource, invokeDefinition } from './source.js';
 import { LIBRARY_KEY, libraryState, matchesSite } from '../core/script-library.js';
@@ -34,10 +34,11 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
     return origins.filter((_, index) => !grants[index]);
   }
   async function status() {
-    const [folder, current, state, enabled] = await Promise.all([read('folder'), snapshot(), chrome.storage.local.get(LOCAL_KEY), available()]);
+    const [folder, current, state, enabled, folderPath] = await Promise.all([read('folder'), snapshot(), chrome.storage.local.get(LOCAL_KEY), available(), read('folderPath')]);
     let readable = false;
     try { readable = !!folder && await folder.queryPermission({ mode: 'read' }) === 'granted'; } catch {}
     return { ...(state[LOCAL_KEY] || {}), connected: !!folder, folderName: folder?.name || current?.folderName || '', readable, enabled,
+      folderPath: folderPath || '', folderRelativePath: current?.folderRelativePath || [],
       count: current?.scripts.length || 0, scripts: (current?.scripts || []).map(script => ({ id: script.id, name: script.name, matches: [...new Set(script.entries.flatMap(entry => entry.matches))] })),
       revision: current?.revision || '', missingOrigins: await missingOrigins(current?.scripts || []), running: jobs.size > 0 };
   }
@@ -91,9 +92,10 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
         await publish({ message: '폴더 읽기 권한을 다시 허용하면 자동 동기화가 이어집니다.', error: '' }); return status();
       }
       if (!await available()) { await publish({ message: '사용자 스크립트 허용을 켜면 동기화가 이어집니다.', error: '' }); return status(); }
-      const { scripts, errors } = await readScripts(folder, previous?.scripts || []);
+      const location = await scriptsLocation(folder);
+      const { scripts, errors } = await readScripts(location.directory, previous?.scripts || []);
       if (scripts.some(script => base.some(item => !item.bundled && item.id === script.id))) throw new Error('공통 스크립트와 같은 id는 사용할 수 없습니다.');
-      const revision = await digest(JSON.stringify({ sourceVersion: SOURCE_VERSION, scripts }));
+      const revision = await digest(JSON.stringify({ sourceVersion: SOURCE_VERSION, scripts, folderRelativePath: location.relativePath }));
       let next = previous;
       if (revision !== previous?.revision) {
         const entries = [];
@@ -106,14 +108,14 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
               code: compileSource({ id: script.id, key, revision: version, world }, sources) });
           }
         }
-        next = { scripts, entries, revision, folderName: folder.name, syncedAt: new Date().toISOString() };
+        next = { scripts, entries, revision, folderName: folder.name, folderRelativePath: location.relativePath, syncedAt: new Date().toISOString() };
       }
       await reconcile(next);
       if (next !== previous) {
         try { await write({ snapshot: next }); }
         catch (error) { await reconcile(previous); throw error; }
       }
-      await publish({ revision, syncedAt: next.syncedAt, errors, error: '', message: errors.length ? '저장 중이거나 잘못된 파일은 마지막 정상 버전을 유지합니다.' : '파일을 저장하면 스크립트 목록에 자동으로 반영됩니다.' });
+      await publish({ revision, syncedAt: next.syncedAt, errors, error: '', message: errors.length ? '아래 파일 오류를 확인하세요. 마지막 정상 버전은 유지합니다.' : scripts.length ? '파일을 저장하면 스크립트 목록에 자동으로 반영됩니다.' : '폴더 연결 완료. 이 폴더 아래 <id>/script.json과 실행 파일을 저장하면 자동으로 나타납니다.' });
       if (next !== previous) await changed();
     } catch (error) { await publish({ error: String(error.message).slice(0, 500), message: '마지막 정상 버전을 유지합니다.' }); }
     return status();

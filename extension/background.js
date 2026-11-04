@@ -310,7 +310,7 @@ async function handle(message, sender) {
     case 'studio:state': return await read();
     case 'frames:scan': {
       const { permitted, ...info } = await inspectFrames(chrome, message.tabId);
-      return info;
+      return { ...info, siteEnabled: info.topAllowed && siteEnabled(await readSites(), info.origin) };
     }
     case 'studio:activate': return await activate(message);
     case 'recording:start': return await start(message);

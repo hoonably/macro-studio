@@ -31,41 +31,62 @@ async function textFile(root, path, max = 512000) {
   if (file.size > max) throw new Error('파일이 너무 큽니다: ' + path);
   return file.text();
 }
-export async function scriptsDirectory(selected) {
-  // Accept the repository or local/ as well, without scanning unrelated folders.
-  let local;
-  try { local = await selected.getDirectoryHandle('local'); } catch (error) { if (error.name !== 'NotFoundError') throw error; }
-  if (local) return local.getDirectoryHandle('scripts');
-  if (selected.name === 'local') return selected.getDirectoryHandle('scripts');
-  if (selected.name !== 'scripts') {
-    let found = false;
-    for await (const handle of selected.values()) if (handle.kind === 'directory' && validId(handle.name)) {
-      try { await handle.getFileHandle('script.json'); found = true; break; } catch (error) { if (error.name !== 'NotFoundError') throw error; }
-    }
-    if (!found) throw new Error('저장소 폴더 또는 local/scripts 폴더를 선택하세요.');
+export async function scriptsLocation(selected) {
+  const child = async (root, name) => {
+    try { return await root.getDirectoryHandle(name); }
+    catch (error) { if (error.name !== 'NotFoundError') throw error; return null; }
+  };
+  const hasFile = async (root, name) => {
+    try { await root.getFileHandle(name); return true; }
+    catch (error) { if (error.name !== 'NotFoundError') throw error; return false; }
+  };
+  if (await hasFile(selected, 'script.json')) throw new Error('개별 매크로 폴더 대신 그 위의 사용 폴더를 선택하세요.');
+  if (selected.name === 'scripts') return { directory: selected, relativePath: [] };
+  const local = await child(selected, 'local'), personal = local && await child(local, 'scripts');
+  if (personal) return { directory: personal, relativePath: ['local', 'scripts'] };
+  // Existing direct macros take priority over a wrapper added alongside them.
+  for await (const handle of selected.values()) if (handle.kind === 'directory' && validId(handle.name) &&
+    (await hasFile(handle, 'script.json') || await hasFile(handle, 'script.js'))) {
+    return { directory: selected, relativePath: [] };
   }
-  return selected;
+  const nested = await child(selected, 'scripts');
+  if (nested) return { directory: nested, relativePath: ['scripts'] };
+  // An empty user-selected folder is a valid starting point. No recursive scan or writes.
+  return { directory: selected, relativePath: [] };
 }
+export async function scriptsDirectory(selected) { return (await scriptsLocation(selected)).directory; }
 export async function readScripts(directory, previous = []) {
   const scripts = [], errors = [], folders = [];
   for await (const handle of directory.values()) if (handle.kind === 'directory' && validId(handle.name)) folders.push(handle);
   if (folders.length > 200) throw new Error('스크립트 폴더는 200개까지 연결할 수 있습니다. local/scripts 폴더를 선택하세요.');
   let bytes = 0;
   for (const folder of folders.sort((a, b) => a.name.localeCompare(b.name))) {
+    let metadataRead = false;
     try {
-      const metadata = scriptMetadata(JSON.parse(await textFile(folder, 'script.json', 64000)), folder.name);
+      const raw = await textFile(folder, 'script.json', 64000);
+      metadataRead = true;
+      const metadata = scriptMetadata(JSON.parse(raw), folder.name);
       if (!metadata.enabled) continue;
       const files = {};
       for (const path of new Set(metadata.entries.flatMap(entry => entry.files))) {
-        files[path] = await textFile(folder, path); bytes += files[path].length * 2;
+        try { files[path] = await textFile(folder, path); }
+        catch (error) { if (error.name === 'NotFoundError') throw new Error('script.json에 지정한 실행 파일이 없습니다: ' + path); throw error; }
+        bytes += files[path].length * 2;
         if (bytes > 6000000) throw new Error('연결한 스크립트의 전체 용량이 너무 큽니다.');
       }
       scripts.push({ ...metadata, files });
     } catch (error) {
       const old = previous.find(script => script.id === folder.name);
       if (old) scripts.push(old);
-      // A newly created folder may not contain script.json until the agent finishes saving.
-      if (old || error.name !== 'NotFoundError') errors.push({ id: folder.name, message: String(error.message).slice(0, 250) });
+      let scriptWithoutMetadata = false;
+      if (!old && !metadataRead && error.name === 'NotFoundError') {
+        try { await folder.getFileHandle('script.js'); scriptWithoutMetadata = true; }
+        catch (missing) { if (missing.name !== 'NotFoundError') throw missing; }
+      }
+      // Empty scaffolding is fine, but a partially saved macro must explain what is missing.
+      if (old || metadataRead || error.name !== 'NotFoundError' || scriptWithoutMetadata) {
+        errors.push({ id: folder.name, message: scriptWithoutMetadata ? 'script.json이 없습니다. script.js와 같은 폴더에 저장하세요.' : String(error.message).slice(0, 250) });
+      }
     }
   }
   return { scripts, errors };

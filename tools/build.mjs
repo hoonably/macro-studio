@@ -98,9 +98,6 @@ export async function build({ root = projectRoot, publicOnly = false, storeOnly 
       for (const page of ['studio', 'scripts']) {
         const file = path.join(staging, 'ui', page + '.html');
         let html = await fs.readFile(file, 'utf8');
-        html = html.replace(/Git으로 설치했다면 <strong>macro-studio 폴더 자체를 선택하세요\.<\/strong> (?:내부의|그 안의) <code>local\/scripts<\/code>를 자동으로 찾아 연결합니다\./, '원하는 위치에 <strong>scripts 폴더를 만들고 선택하세요.</strong> 에이전트가 만든 개인 스크립트를 이 폴더에 저장하면 자동 반영됩니다.');
-        html = html.replace(/저장소 바로 아래의 <code>scripts<\/code>는 개발용 예제 폴더입니다\. 개인 스크립트는 <code>local\/scripts<\/code>에 저장하세요\./, '처음에는 폴더 연결 없이 작업을 기록해도 됩니다. 개인 스크립트를 실행할 때 폴더를 연결하세요. Git·npm 설치는 필요하지 않습니다.');
-        html = html.replace('Codex 또는 Claude Code에서 이 저장소를 열고 프롬프트를 붙여 넣으세요.', '개인 스크립트를 저장할 폴더를 코딩 에이전트에서 열고 프롬프트를 붙여 넣으세요.');
         html = html.replace('<button id="reload-extension" class="text-button">확장 기능 업데이트 적용</button>', '<button id="reload-extension" class="text-button" hidden>확장 다시 시작</button>');
         html = html.replace('스크립트와 확장 업데이트를 자동으로 반영합니다.', '개인 스크립트 파일을 자동으로 반영합니다.');
         await fs.writeFile(file, html);

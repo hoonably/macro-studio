@@ -31,7 +31,14 @@ test('a fresh personal build prepares an empty connectable script folder; public
   await assert.rejects(fs.access(path.join(root, 'dist/.gallery')));
   assert.deepEqual(await fs.readdir(path.join(root, 'local/scripts')), []);
   const directory = file => ({ kind: 'directory', name: path.basename(file),
-    getDirectoryHandle: async name => { await fs.access(path.join(file, name)); return directory(path.join(file, name)); },
+    getDirectoryHandle: async name => {
+      try { await fs.access(path.join(file, name)); return directory(path.join(file, name)); }
+      catch (error) { if (error.code === 'ENOENT') error.name = 'NotFoundError'; throw error; }
+    },
+    getFileHandle: async name => {
+      try { await fs.access(path.join(file, name)); return { name, kind: 'file' }; }
+      catch (error) { if (error.code === 'ENOENT') error.name = 'NotFoundError'; throw error; }
+    },
     async *values() { for (const name of await fs.readdir(file)) yield directory(path.join(file, name)); }
   });
   assert.deepEqual(await readScripts(await scriptsDirectory(directory(root))), { scripts: [], errors: [] });
@@ -79,7 +86,8 @@ test('builds ignore legacy presets and examples; only explicit personal scripts 
   assert.match(await fs.readFile(path.join(store.output, 'core/distribution.js'), 'utf8'), /STORE_BUILD = true/);
   for (const page of ['studio', 'scripts']) {
     const html = await fs.readFile(path.join(store.output, 'ui', page + '.html'), 'utf8');
-    assert.match(html, /scripts 폴더를 만들고 선택/);
+    assert.match(html, /빈 폴더를 만들어 선택/);
+    assert.match(html, /id="folder-path"/);
     assert.doesNotMatch(html, /macro-studio 폴더 자체|local\/scripts|이 저장소를 열고/);
     assert.match(html, /id="reload-extension"[^>]+hidden/);
   }

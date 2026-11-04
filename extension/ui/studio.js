@@ -1,6 +1,6 @@
 import { agentPrompt, exportRecording, MAX_STEPS } from '../recorder/model.js';
 import { sitePattern } from '../recorder/frames.js';
-import { STORE_BUILD } from '../core/distribution.js';
+import { folderReady, scriptsPath } from '../core/script-setup.js';
 const $ = selector => document.querySelector(selector);
 const DRAFT_KEY = 'macroStudioStudioDraft';
 let draftWrites = Promise.resolve(), restoringDraft = true;
@@ -31,10 +31,53 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === 'update:cancel') while (updateLocked.length) updateLocked.pop().disabled = false;
 });
 let recording = null, active = null;
+let setupState = null, creationOpened = false, siteReadinessSignature = '';
+const excludedFrames = new Set();
 let frameInfo = null, frameSignature = '', frameRequest = 0, framePending = false, permissionBusy = false;
 const selectedFrames = new Set();
 const targetTabId = () => recording?.status === 'recording' ? recording.tabId : active?.id;
-const status = (message, error = false) => { $('#status').textContent = message; $('#status').dataset.error = error; };
+const status = (message, error = false) => {
+  $('#status').textContent = message; $('#status').dataset.error = error;
+  if ($('#macro-workspace').hidden) { $('#site-status').textContent = message; $('#site-status').dataset.error = String(error); }
+};
+const baseReady = () => folderReady(setupState) && setupState.enabled;
+function siteReadiness() {
+  const current = frameInfo?.tabId === targetTabId() ? frameInfo : null;
+  if (!current) return { ready: false, detail: '자동화할 웹사이트 탭을 열어주세요' };
+  if (!current.topAllowed) return { ready: false, detail: '아래의 ‘이 사이트에서 사용하기’를 누르고 Chrome에서 허용하세요' };
+  if (current.siteEnabled === false) return { ready: false, detail: '‘이 사이트에서 사용하기’를 눌러 사이트 적용을 켜세요' };
+  if (!current.detectionEnabled) return { ready: false, detail: '아래의 ‘내부 화면 자동 감지 켜기’를 눌러 확인하세요' };
+  const missing = current.frames.filter(frame => !frame.allowed && !excludedFrames.has(frame.pattern));
+  return { ready: !missing.length, detail: missing.length ? '필요한 내부 주소를 허용하거나 관계없는 주소를 제외하세요' : '현재 사이트와 선택한 내부 화면의 접근 확인 완료' };
+}
+const creationReady = () => baseReady() && siteReadiness().ready;
+function creationControls() {
+  const ready = creationReady(), busy = recording?.status === 'recording';
+  $('#open-creation').disabled = !ready || busy;
+  $('#open-creation').hidden = creationOpened && ready;
+  $('#macro-workspace').hidden = !(creationOpened && ready) && !busy;
+  $('#name').disabled = busy || !ready;
+  $('#goal').disabled = $('#variables').disabled = !ready || busy;
+  $('#prompt').disabled = !ready || !creationOpened || !recording?.steps.length || busy;
+  $('#download').disabled = !recording?.steps.length || busy;
+  $('#creation-gate').textContent = !folderReady(setupState) ? '1. 사용 폴더를 연결하고 전체 저장 경로를 확인하세요.' :
+    !setupState.enabled ? '2. Chrome의 사용자 스크립트 허용을 켜고 허용 상태를 다시 확인하세요.' :
+    !siteReadiness().ready ? '3. 사이트 접근 안내에 따라 자동화할 사이트를 확인하세요.' :
+    '사용 준비 완료. 이 폴더에 저장할 매크로를 만들 수 있습니다.';
+  const site = siteReadiness(), signature = JSON.stringify(site);
+  if (signature !== siteReadinessSignature) {
+    siteReadinessSignature = signature;
+    document.dispatchEvent(new window.CustomEvent('macro-studio:site-readiness', { detail: site }));
+  }
+}
+document.addEventListener('macro-studio:setup-state', event => {
+  setupState = event.detail;
+  permissionControls(); updatePreview();
+});
+async function refreshSetup() {
+  setupState = await request('local:status');
+  permissionControls(); updatePreview();
+}
 async function request(type, payload = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...payload });
   if (!response?.ok) throw new Error(response?.error || '확장 프로그램 응답이 없습니다.');
@@ -57,16 +100,19 @@ function clearFrames(message, error = false) {
 }
 function permissionControls() {
   const current = frameInfo?.tabId === targetTabId() ? frameInfo : null;
-  $('#allow').disabled = permissionBusy || !Number.isInteger(targetTabId());
-  $('#allow').textContent = current?.topAllowed ? current.detectionEnabled ? '기록기 다시 연결' : '내부 화면 자동 감지 켜기' : '이 사이트에서 사용하기';
-  $('#start').disabled = permissionBusy || recording?.status === 'recording' || !current?.topAllowed;
+  $('#allow').disabled = permissionBusy || !baseReady() || !Number.isInteger(targetTabId());
+  $('#allow').textContent = current?.topAllowed && current.siteEnabled !== false ? current.detectionEnabled ? '기록기 다시 연결' : '내부 화면 자동 감지 켜기' : '이 사이트에서 사용하기';
+  $('#start').disabled = permissionBusy || !creationOpened || !creationReady() || recording?.status === 'recording';
   const missing = (current?.frames || []).filter(frame => !frame.allowed);
   $('#allow-frames').hidden = !missing.length;
-  $('#allow-frames').disabled = permissionBusy || !missing.some(frame => selectedFrames.has(frame.pattern));
+  $('#allow-frames').disabled = permissionBusy || !baseReady() || !missing.some(frame => selectedFrames.has(frame.pattern));
+  $('#skip-frames').hidden = !missing.some(frame => !excludedFrames.has(frame.pattern) && !selectedFrames.has(frame.pattern));
+  $('#skip-frames').disabled = permissionBusy || !baseReady();
   for (const checkbox of $('#frame-sites').querySelectorAll('input')) checkbox.disabled = permissionBusy;
+  creationControls();
 }
 function renderFrames(info) {
-  if (frameInfo?.tabId !== info.tabId || frameInfo?.origin !== info.origin) selectedFrames.clear();
+  if (frameInfo?.tabId !== info.tabId || frameInfo?.origin !== info.origin) { selectedFrames.clear(); excludedFrames.clear(); }
   const missing = info.frames.filter(frame => !frame.allowed);
   for (const pattern of selectedFrames) if (!missing.some(frame => frame.pattern === pattern)) selectedFrames.delete(pattern);
   frameInfo = info;
@@ -114,7 +160,10 @@ async function refreshFrames(force = false) {
 }
 const payload = () => ({ ...recording, name: $('#name').value || recording.name });
 function updatePreview() {
-  $('#preview').value = recording ? agentPrompt(payload(), { goal: $('#goal').value, variables: $('#variables').value, standalone: STORE_BUILD }) : '';
+  $('#preview').value = recording && creationReady() ? agentPrompt(payload(), {
+    goal: $('#goal').value, variables: $('#variables').value, standalone: true,
+    scriptsPath: scriptsPath(setupState.folderPath, setupState.folderRelativePath)
+  }) : '';
 }
 function render(state) {
   recording = state;
@@ -145,6 +194,7 @@ function render(state) {
   else if (state) status(state.note || '기록을 끝냈습니다. 값을 확인하고 에이전트에게 전달하세요.');
 }
 $('#allow').addEventListener('click', async () => {
+  if (!baseReady()) return;
   const tabId = targetTabId();
   try {
     const current = frameInfo?.tabId === tabId ? frameInfo : null;
@@ -155,7 +205,11 @@ $('#allow').addEventListener('click', async () => {
     const origins = current?.topAllowed ? [] : [pattern];
     // No asynchronous work precedes this call: Chrome requires the actual click gesture.
     if ((permissions.length || origins.length) && !await chrome.permissions.request({ origins, permissions })) throw new Error('요청한 권한이 허용되지 않았습니다. 기존에 허용한 화면은 계속 기록할 수 있습니다.');
-    const result = await request('studio:activate', { tabId, origin: pattern.slice(0, -2) });
+    let result;
+    if (current?.siteEnabled === false) {
+      await request('site:set', { tabId, origin: pattern.slice(0, -2), enabled: true });
+      result = { failed: 0 };
+    } else result = await request('studio:activate', { tabId, origin: pattern.slice(0, -2) });
     status(result.failed ? '일부 내부 화면에 연결하지 못했습니다. 화면이 준비된 후 기록기 다시 연결을 눌러주세요.' : recording?.status === 'recording' ? '새로 허용한 화면도 이어서 기록합니다.' : '이 사이트에서 사용할 수 있습니다. 내부 화면을 확인하고 새 기록을 시작하세요.', !!result.failed);
     await refreshFrames(true);
   } catch (error) { status(error.message, true); }
@@ -163,7 +217,7 @@ $('#allow').addEventListener('click', async () => {
 });
 $('#allow-frames').addEventListener('click', async () => {
   const current = frameInfo, tabId = targetTabId();
-  if (permissionBusy || current?.tabId !== tabId) return;
+  if (!baseReady() || permissionBusy || current?.tabId !== tabId) return;
   const origins = current.frames.filter(frame => !frame.allowed && selectedFrames.has(frame.pattern)).map(frame => frame.pattern);
   if (!origins.length) return;
   permissionBusy = true; permissionControls();
@@ -175,10 +229,25 @@ $('#allow-frames').addEventListener('click', async () => {
   } catch (error) { status(error.message, true); }
   finally { permissionBusy = false; permissionControls(); }
 });
+$('#skip-frames').addEventListener('click', () => {
+  if (!baseReady() || permissionBusy) return;
+  for (const frame of frameInfo?.frames || []) if (!frame.allowed && !selectedFrames.has(frame.pattern)) excludedFrames.add(frame.pattern);
+  permissionControls(); updatePreview();
+});
+$('#open-creation').addEventListener('click', async () => {
+  try {
+    await refreshSetup(); await refreshFrames(true);
+    if (!creationReady()) throw new Error('사용 폴더·Chrome 실행 허용·사이트 접근을 먼저 완료하세요.');
+    creationOpened = true; permissionControls(); updatePreview(); $('#name').focus();
+  } catch (error) { $('#creation-gate').textContent = error.message; }
+});
 $('#start').addEventListener('click', async () => {
   $('#start').disabled = true;
   try {
+    await refreshSetup();
     await refreshTab();
+    await refreshFrames(true);
+    if (!creationOpened || !creationReady()) throw new Error('사용 준비를 완료하고 매크로 만들기를 열어주세요.');
     if (!active?.id) throw new Error('기록할 웹페이지를 열어주세요.');
     render(await request('recording:start', { tabId: active.id, name: $('#name').value }));
     await refreshFrames(true);
@@ -195,8 +264,12 @@ $('#stop').addEventListener('click', async () => {
   } catch (error) { status(error.message, true); $('#stop').disabled = false; }
 });
 $('#prompt').addEventListener('click', async () => {
-  updatePreview();
-  try { await navigator.clipboard.writeText($('#preview').value); status(STORE_BUILD ? '복사했습니다. 개인 스크립트를 저장할 폴더를 연 코딩 에이전트에 붙여 넣으세요.' : '복사했습니다. 저장소를 연 Codex 또는 Claude Code에 붙여 넣으세요.'); }
+  try {
+    await refreshSetup();
+    if (!creationOpened || !creationReady() || recording?.status === 'recording' || !recording?.steps.length) throw new Error('사용 준비를 완료하고 기록을 끝낸 뒤 복사하세요.');
+    updatePreview();
+  } catch (error) { status(error.message, true); return; }
+  try { await navigator.clipboard.writeText($('#preview').value); status('복사했습니다. Codex 또는 Claude Code 채팅에 붙여넣으세요. 저장 위치는 지시문에 포함했습니다.'); }
   catch { $('#preview').focus(); $('#preview').select(); status('미리보기에서 직접 복사하세요.'); }
 });
 $('#download').addEventListener('click', () => {
@@ -217,6 +290,7 @@ chrome.permissions.onRemoved.addListener(() => refreshFrames(true));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') refreshFrames(true); });
 setInterval(() => { if (document.visibilityState !== 'hidden' && !permissionBusy) refreshFrames(); }, 1500);
 await refreshTab();
+try { await refreshSetup(); } catch (error) { $('#creation-gate').textContent = error.message; }
 try {
   const initial = await request('studio:state');
   if (initial?.name) $('#name').value = initial.name;

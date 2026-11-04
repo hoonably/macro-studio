@@ -4,8 +4,11 @@ import vm from 'node:vm';
 import { context, code, tick } from './helpers.mjs';
 import { agentPrompt, exportRecording, MAX_STEPS, normalizeEvent } from '../extension/recorder/model.js';
 import { sitePattern } from '../extension/recorder/frames.js';
+import { folderReady, scriptsPath } from '../extension/core/script-setup.js';
 
-async function studio({ enabled = false, sites = [], initialRecording = null, session = {} } = {}) {
+async function studio({ enabled = false, sites = [], initialRecording = null, session = {}, setup = {
+  connected: true, readable: true, enabled: true, folderName: 'scripts', folderPath: '/Users/example/MyMacros/scripts', folderRelativePath: []
+} } = {}) {
   let active = { id: 42, url: 'https://example.test/form' }, recording = structuredClone(initialRecording), approve = true, gesture = false, poll, activated, clipboardFailure = false;
   const permissionCalls = [], messages = [], copied = [];
   let frameResult = null;
@@ -13,13 +16,17 @@ async function studio({ enabled = false, sites = [], initialRecording = null, se
     runtime: { id: 'studio', onMessage: { addListener() {} }, sendMessage: async message => {
       messages.push(message);
       if (message.type === 'studio:state') return { ok: true, value: recording };
-      if (message.type === 'local:status') return { ok: true, value: { connected: false, count: 0 } };
+      if (message.type === 'local:status') return { ok: true, value: { ...setup } };
       if (message.type === 'frames:scan') return frameResult || { ok: true, value: {
         tabId: message.tabId, origin: message.tabId === 42 ? 'https://example.test' : 'https://other.test',
         pattern: message.tabId === 42 ? 'https://example.test/*' : 'https://other.test/*', topAllowed: true,
         detectionEnabled: enabled, frames: enabled ? structuredClone(sites) : []
       } };
       if (message.type === 'studio:activate') return { ok: true, value: { connected: 1, failed: 0 } };
+      if (message.type === 'site:set') {
+        if (frameResult?.value) frameResult.value.siteEnabled = message.enabled;
+        return { ok: true, value: { enabled: message.enabled } };
+      }
       if (message.type === 'recording:start') {
         recording = { id: 'recording-1', tabId: message.tabId, name: 'test', status: 'recording', steps: [], origins: [] };
         return { ok: true, value: recording };
@@ -46,14 +53,15 @@ async function studio({ enabled = false, sites = [], initialRecording = null, se
     storage: { session: { get: async key => ({ [key]: session[key] }), set: async values => Object.assign(session, values) }, onChanged: { addListener() {} } }
   };
   const navigator = { clipboard: { writeText: async value => { if (clipboardFailure) throw new Error('Clipboard unavailable'); copied.push(value); } } };
-  const env = context(await code('extension/ui/studio.html'), { STORE_BUILD: false, chrome, navigator, URL, agentPrompt, exportRecording, MAX_STEPS, sitePattern,
+  const env = context(await code('extension/ui/studio.html'), { STORE_BUILD: false, chrome, navigator, URL, agentPrompt, exportRecording, MAX_STEPS, sitePattern, folderReady, scriptsPath,
     setInterval: callback => { poll = callback; return 1; } });
   await vm.runInContext('(async () => {' + (await code('extension/ui/studio.js')).replace(/^import[^\n]+\n/gm, '') + '\n})()', env.ctx);
-  return { ...env, sites, permissionCalls, messages, copied, session,
+  const click = async selector => { gesture = true; env.document.querySelector(selector).click(); gesture = false; await tick(); };
+  return { ...env, sites, permissionCalls, messages, copied, session, setup,
     setFrameResult: value => { frameResult = value; },
     setApproval: value => { approve = value; },
     failClipboard: () => { clipboardFailure = true; },
-    click: async selector => { gesture = true; env.document.querySelector(selector).click(); gesture = false; await tick(); },
+    click, open: () => click('#open-creation'),
     poll: async () => { poll(); await tick(); },
     activate: async tab => { active = tab; await activated(); await tick(); }
   };
@@ -75,6 +83,7 @@ test('sidebar discovers frames without manual addresses and requests only select
   checkbox.checked = true; checkbox.dispatchEvent(new env.window.Event('change'));
   env.setApproval(false); await env.click('#allow-frames');
   assert.match(env.document.querySelector('#status').textContent, /허용되지 않았습니다/);
+  assert.match(env.document.querySelector('#site-status').textContent, /허용되지 않았습니다/, 'Setup errors stay visible while creation is hidden');
   assert.equal(env.sites[1].allowed, false);
   env.setApproval(true); await env.click('#allow-frames');
   assert.deepEqual(env.permissionCalls.at(-1), { origins: ['https://new.test/*'] });
@@ -89,6 +98,8 @@ test('changing to an unreadable site clears old grants and uses the recovered or
   const env = await studio({ enabled: true, sites: [
     { origin: 'https://child.test', pattern: 'https://child.test/*', frameIds: [2], allowed: false }
   ] });
+  assert.equal(env.document.querySelector('#start').disabled, true, 'Missing internal sites must first be allowed or explicitly excluded');
+  await env.click('#skip-frames'); await env.open();
   assert.equal(env.document.querySelector('#start').disabled, false);
   env.setFrameResult({ ok: false, error: '현재 탭의 주소를 확인할 수 없습니다. 도구모음에서 다시 열어주세요.' });
   await env.activate({ id: 99 });
@@ -113,6 +124,7 @@ test('changing to an unreadable site clears old grants and uses the recovered or
 
 test('new frames during recording are suggested without a popup and stay bound to the recording tab', async () => {
   const env = await studio({ enabled: true });
+  await env.open();
   await env.click('#start');
   await env.activate({ id: 99, url: 'https://other.test/page' });
   env.sites.push({ origin: 'https://later.test', pattern: 'https://later.test/*', frameIds: [7], allowed: false });
@@ -134,6 +146,7 @@ test('step deletion preserves remaining recording metadata and the visible previ
       { id: 'submit', ...normalizeEvent({ action: 'click', page: { url: 'https://example.test/form' }, target: { label: '최종 결재상신' } }) }
     ]
   } });
+  await env.open();
   const preview = env.document.querySelector('#preview'), variables = env.document.querySelector('#variables');
   assert.equal(env.document.querySelectorAll('#steps select, #steps input').length, 0);
   assert.equal(preview.closest('details'), null);
@@ -159,14 +172,62 @@ test('step deletion preserves remaining recording metadata and the visible previ
 test('studio descriptions and changing values survive an extension update and remain part of the copied prompt', async () => {
   const recording = { name: 'Original name', status: 'stopped', steps: [{ id: 'field', ...normalizeEvent({ action: 'input', page: { url: 'https://example.test/form' }, target: { label: 'date' }, value: '2026-10-24' }) }] };
   const env = await studio({ enabled: true, initialRecording: recording });
+  await env.open();
   for (const [id, value] of [['name', 'My task'], ['goal', 'Open form and stop before submit'], ['variables', 'date, time']]) {
     const input = env.document.getElementById(id); input.value = value; input.dispatchEvent(new env.window.Event('input'));
   }
   await tick();
   const reopened = await studio({ enabled: true, initialRecording: recording, session: env.session });
+  await reopened.open();
   assert.equal(reopened.document.getElementById('name').value, 'My task');
   assert.equal(reopened.document.getElementById('goal').value, 'Open form and stop before submit');
   assert.equal(reopened.document.getElementById('variables').value, 'date, time');
   await reopened.click('#prompt');
   assert.match(reopened.copied[0], /변경할 값: date, time/);
+});
+
+test('creation and prompt copy require a connected readable folder, confirmed path and Chrome execution permission', async () => {
+  for (const change of [{ connected: false }, { readable: false }, { folderPath: '' }, { enabled: false }]) {
+    const setup = { connected: true, readable: true, enabled: true, folderName: 'scripts', folderPath: '/Users/example/scripts', ...change };
+    const env = await studio({ enabled: true, setup });
+    assert.equal(env.document.querySelector('#open-creation').disabled, true);
+    assert.equal(env.document.querySelector('#macro-workspace').hidden, true);
+    await env.click('#start');
+    await env.click('#prompt');
+    assert.equal(env.messages.filter(message => message.type === 'recording:start').length, 0);
+    assert.equal(env.copied.length, 0);
+    assert.equal(env.permissionCalls.length, 0);
+  }
+});
+
+test('copied instructions use the confirmed absolute directory and lock again when the folder disconnects', async () => {
+  const env = await studio({ enabled: true, initialRecording: {
+    name: 'Test', status: 'stopped', steps: [{ id: 'field', ...normalizeEvent({ action: 'input', page: { url: 'https://example.test/form' }, target: { label: 'date' }, value: '2026-10-24' }) }]
+  } });
+  await env.open(); await env.click('#prompt');
+  assert.match(env.copied[0], /현재 연결된 개인 매크로 저장 폴더.*\/Users\/example\/MyMacros\/scripts/);
+  assert.match(env.copied[0], /별도 가짜 DOM/);
+  assert.doesNotMatch(env.copied[0], /npm run verify/);
+  env.setup.connected = false;
+  env.document.dispatchEvent(new env.window.CustomEvent('macro-studio:setup-state', { detail: { ...env.setup } }));
+  assert.equal(env.document.querySelector('#macro-workspace').hidden, true);
+  assert.equal(env.document.querySelector('#prompt').disabled, true);
+  await env.click('#prompt');
+  assert.equal(env.copied.length, 1);
+  assert.equal(env.document.querySelector('#count').textContent, '1단계', 'Disconnecting preserves the existing recording');
+});
+
+test('retained host permission does not mark an OFF site ready; the explicit use action enables it', async () => {
+  const env = await studio({ enabled: true });
+  env.setFrameResult({ ok: true, value: {
+    tabId: 42, origin: 'https://example.test', pattern: 'https://example.test/*',
+    topAllowed: true, siteEnabled: false, detectionEnabled: true, frames: []
+  } });
+  await env.poll();
+  assert.equal(env.document.querySelector('#open-creation').disabled, true);
+  await env.click('#allow');
+  assert.equal(env.permissionCalls.length, 0, 'An existing host grant is reused');
+  assert.equal(env.messages.find(message => message.type === 'site:set').enabled, true);
+  await env.open();
+  assert.equal(env.document.querySelector('#macro-workspace').hidden, false);
 });

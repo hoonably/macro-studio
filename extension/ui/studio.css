@@ -29,3 +29,11 @@ button{min-height:38px;border-radius:9px}.text-button{min-height:30px}.secondary
 .setup-overview{margin:8px 0 14px}.setup-overview summary{cursor:pointer;color:#648071;font-size:11px}.setup-overview .setup-checklist{margin-top:12px}
 footer{border-top:1px solid #e2e8e5;padding:16px 2px;align-items:center}
 @media(max-width:520px){.brand{padding:18px}main{padding:16px}section{padding:18px;margin-bottom:14px}.setup-checklist{grid-template-columns:1fr;gap:6px}.setup-checklist li{padding:9px 12px}.setup-checklist small{margin-top:1px}.scripts-connection .hint{font-size:11px}.section-caption{display:none}}
+/* Setup stays visible until its checks pass; creation keeps its draft while locked. */
+#macro-workspace[hidden], #site-setup[hidden] { display: none; }
+.folder-path-setup { margin: 18px 0; padding: 16px; border: 1px solid #dce5e5; border-radius: 12px; background: #f8fafb; }
+.folder-path-setup input { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.folder-path-setup code { overflow-wrap: anywhere; }
+.path-help { margin: 12px 0; }
+.agent-guide { padding-left: 22px; color: #52696d; line-height: 1.8; }
+#open-creation { margin: 0 0 24px; }
