@@ -29,7 +29,7 @@ $('site-toggle').addEventListener('click', async () => {
   finally { busy = false; $('site-toggle').disabled = !state; }
 });
 $('scripts').addEventListener('click', async () => {
-  try { await request('local:open'); window.close(); }
+  try { await window.MacroStudioPanel.open('studio'); window.close(); }
   catch (error) { render(error.message, true); }
 });
 try {

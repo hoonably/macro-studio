@@ -3,7 +3,7 @@
 body{width:340px;margin:0}
 header{display:flex;align-items:center;gap:11px;padding:20px 20px 16px}
 header div{min-width:0}h1{font-size:16px;line-height:1.4;margin:0;font-weight:700;letter-spacing:-.02em}
-#site{font-size:12px;color:#728096;margin:3px 0 0;overflow-wrap:anywhere}
+#site{font-size:12px;color:#5e6e83;margin:3px 0 0;overflow-wrap:anywhere}
 main{padding:0 20px 18px}.setting{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 0 14px;border-top:1px solid #edf0f5}
 #toggle-label{font-size:14px;font-weight:600}
 button{font:inherit;cursor:pointer}button:disabled{cursor:default;opacity:.5}
@@ -17,3 +17,5 @@ footer{padding:11px 20px;background:#f7f9fc;border-top:1px solid #edf0f5}
 footer button{padding:0;border:0;background:none;color:#61728a;font-size:12px}
 
 footer{display:flex;align-items:center;justify-content:space-between;gap:12px}footer a{font-size:11px;color:#61728a;text-decoration:none}footer a:hover{text-decoration:underline}
+
+::selection{background:#dce9fb;color:#24354d}footer button:hover{color:#155fc0;text-decoration:underline;text-underline-offset:3px}footer a{ text-underline-offset:3px }

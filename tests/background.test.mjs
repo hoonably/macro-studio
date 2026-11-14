@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
-import { MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent } from '../extension/recorder/model.js';
+import { MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent, normalizeFieldContext } from '../extension/recorder/model.js';
+import { FIELD_PREFERENCES_KEY, fieldPreferences, changeFieldPreference } from '../extension/core/field-preferences.js';
 import { code } from './helpers.mjs';
 import { LIBRARY_KEY, libraryState, matchesSite, changeLibrary } from '../extension/core/script-library.js';
 import { inspectFrames, sitePattern } from '../extension/recorder/frames.js';
+import { createFramePermissionMonitor } from '../extension/recorder/frame-permissions.js';
 import { createScriptRuntime } from '../extension/scripts/runtime.js';
 import { optionalResetPermissions } from '../extension/core/reset.js';
 import { SITES_KEY, siteOrigin, siteSettings, siteEnabled } from '../extension/core/site-settings.js';
@@ -18,7 +20,7 @@ async function worker({ local = { [SITES_KEY]: { 'https://example.test': true } 
   { id: 'weekly-task', name: '주간 작업', matches: ['https://example.test/*'] },
   { id: 'other-task', name: '다른 작업', matches: ['https://other.test/*'] }
 ] } = {}) {
-  const state = {}, calls = [], lifecycle = {}, memory = stored;
+  const state = {}, calls = [], lifecycle = {}, memory = stored, windows = new Map();
   const diskBuild = { id: '0'.repeat(64) };
   let listener;
   const removed = [];
@@ -33,16 +35,19 @@ async function worker({ local = { [SITES_KEY]: { 'https://example.test': true } 
     permissions: { remove: async value => { calls.push(['remove-permissions', value]); return true; }, getAll: async () => ({ origins, permissions }), contains: async query =>
       (query.origins || []).every(item => origins.some(pattern => matchesSite(pattern, item))) &&
       (query.permissions || []).every(item => permissions.includes(item)), onAdded: { addListener: value => { (lifecycle.added ||= []).push(value); } }, onRemoved: { addListener: value => removed.push(value) } },
-    webNavigation: { onCompleted: navigationEvent ? { addListener: callback => { lifecycle.navigation = callback; } } : undefined, getAllFrames: async () => structuredClone(frames) },
+    webNavigation: { onCommitted: navigationEvent ? {addListener:callback=>{lifecycle.committed=callback;}} : undefined, onCompleted: navigationEvent ? { addListener: callback => { lifecycle.navigation = callback; } } : undefined, getAllFrames: async () => structuredClone(frames) },
+    windows: {create:async options=>{calls.push(['create-window',options]);windows.set(100,{id:100});return {id:100};},
+      get:async id=>{if(!windows.has(id)) throw new Error('closed');return windows.get(id);},
+      remove:async id=>{windows.delete(id);calls.push(['remove-window',id]);}},
     scripting: { getRegisteredContentScripts: async () => [], registerContentScripts: async value => calls.push(['register', value]),
       executeScript: async value => calls.push(['inject', value]) },
-    tabs: { get: async id => ({ id, url: 'https://example.test/form' }), query: async () => [{ id: 42, url: 'https://example.test/form' }], sendMessage: async (...args) => calls.push(['send', args]),
+    tabs: { get: async id => ({ id, windowId:7, url: 'https://example.test/form' }), query: async () => [{ id: 42, url: 'https://example.test/form' }], sendMessage: async (...args) => calls.push(['send', args]),
       create: async options => calls.push(['create', options]), update: async (...args) => calls.push(['update-tab', ...args]), onRemoved: event() },
     alarms: { create: async (name) => calls.push(['alarm', name]), clear: async name => calls.push(['clear-alarm', name]), onAlarm: { addListener: value => { lifecycle.alarm = value; } } },
     sidePanel: { open: async value => calls.push(['open', value]), setPanelBehavior: async value => calls.push(['panel-behavior', value]) }
   };
   const source = (await code('extension/background.js')).replace(/^import[^\n]+\n/gm, '');
-  vm.runInNewContext(source, { STORE_BUILD: storeBuild, chrome, MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent, LIBRARY_KEY, libraryState, matchesSite, changeLibrary, inspectFrames, sitePattern,
+  vm.runInNewContext(source, { STORE_BUILD: storeBuild, chrome, MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent, normalizeFieldContext, FIELD_PREFERENCES_KEY, fieldPreferences, changeFieldPreference, LIBRARY_KEY, libraryState, matchesSite, changeLibrary, inspectFrames, sitePattern, createFramePermissionMonitor,
     SITES_KEY, siteOrigin, siteSettings, siteEnabled, optionalResetPermissions, createBuildUpdater, UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, availableVersion,
     createScriptRuntime: (browser, options) => createScriptRuntime(browser, { ...options, read: async key => memory[key], write: async values => Object.assign(memory, values), clear: async () => { for (const key of Object.keys(memory)) delete memory[key]; } }),
     fetch: async url => ({ ok: true, json: async () => structuredClone(url.endsWith('/core/build-info.json') ? diskBuild : catalog) }),
@@ -75,20 +80,12 @@ test('store update notifications retain only a version and never force an active
   await env.lifecycle.installed();
   assert.equal(env.local[AVAILABLE_UPDATE_KEY], undefined);
 });
-test('applying an extension update resumes its setup page even when Chrome closes extension tabs', async () => {
-  for (const kind of ['closed', 'setup', 'other']) {
-    const env = await worker({ local: { macroStudioResumeScriptsTab: 42 } });
-    env.chrome.tabs.get = async () => {
-      if (kind === 'closed') throw new Error('Tab closed during extension reload');
-      return { id: 42, url: kind === 'setup' ? 'chrome-extension://studio/ui/scripts.html' : 'https://example.test/form' };
-    };
-    await env.lifecycle.installed();
-    assert.equal(env.calls.find(call => call[0] === 'panel-behavior')[1].openPanelOnActionClick, false);
-    assert.equal(env.local.macroStudioResumeScriptsTab, undefined);
-    const resumed = env.calls.find(call => call[0] === (kind === 'closed' ? 'create' : 'update-tab'));
-    if (kind === 'other') assert.equal(resumed, undefined, 'An unrelated tab must not be navigated');
-    else assert.match(resumed.at(-1).url, /^chrome-extension:\/\/studio\/ui\/scripts\.html\?updated=\d+$/);
-  }
+test('updates remove legacy page-resume keys without reopening extension HTML tabs',async()=>{
+  const env=await worker({local:{macroStudioResumeScriptsTab:42,macroStudioResumeUpdatePages:[{url:'chrome-extension://studio/ui/scripts.html'}]}});
+  await env.lifecycle.installed();
+  assert.equal(env.local.macroStudioResumeScriptsTab,undefined);
+  assert.equal(env.local.macroStudioResumeUpdatePages,undefined);
+  assert.ok(!env.calls.some(call=>['create','update-tab','create-window'].includes(call[0])));
 });
 test('frame discovery reads real nested URLs, deduplicates origins, and never grants access or leaks private URLs', async () => {
   const env = await worker({ permissions: ['webNavigation'], origins: ['https://example.test/*', 'https://known.test/*'], frames: [
@@ -110,7 +107,7 @@ test('frame discovery reads real nested URLs, deduplicates origins, and never gr
 });
 test('new sites with a hidden tab URL use the approved top-frame lookup and remain gated by host permission', async () => {
   for (const origin of ['https://when2jam.pages.dev', 'https://www.naver.com', 'http://localhost:3000']) {
-    const env = await worker({ permissions: ['webNavigation'], frames: [
+    const env = await worker({ origins:['https://example.test/*','https://child.test/*'],permissions: ['webNavigation'], frames: [
       { frameId: 0, url: origin + '/page?token=PRIVATE' }, { frameId: 3, url: 'https://child.test/frame' }
     ] });
     env.chrome.tabs.get = async id => ({ id });
@@ -435,9 +432,9 @@ test('build changes defer only during active work, then reload without deleting 
 
 test('frame navigation publishes a tab-only notification without scanning or granting permissions', async () => {
   const env = await worker({ permissions: ['webNavigation'] });
-  env.lifecycle.navigation({ tabId: 42, url: 'https://private.test/?token=secret', frameId: 7 });
+  await env.lifecycle.navigation({ tabId: 42, url: 'https://private.test/?token=secret', frameId: 7 });
   assert.deepEqual(JSON.parse(JSON.stringify(env.calls.filter(call => call[0] === 'extension-message'))), [['extension-message', { type: 'frames:changed', tabId: 42 }]]);
-  env.lifecycle.navigation({ tabId: -1 });
+  await env.lifecycle.navigation({ tabId: -1 });
   assert.equal(env.calls.filter(call => call[0] === 'extension-message').length, 1);
 });
 
@@ -448,4 +445,93 @@ test('granting the optional navigation API installs its listener once without ne
   await Promise.all(env.lifecycle.added.map(listener => listener()));
   await Promise.all(env.lifecycle.added.map(listener => listener()));
   assert.equal(count, 1);
+});
+
+test('field metadata is recording-bound, sanitized and separate from actions; double clicks replace their two click events',async()=>{
+  const env=await worker();
+  const started=await env.send({type:'recording:start',tabId:42,name:'예시'});
+  const id=started.value.id;
+  const context={fields:[{name:'minute',type:'text',value:'00'},{type:'password',value:'DO_NOT_COLLECT'}]};
+  assert.ok((await env.send({type:'capture:context',recordingId:'wrong',context},env.content)).value.ignored);
+  assert.ok((await env.send({type:'capture:context',recordingId:id,context},{...env.content,tab:{id:99}})).value.ignored);
+  await env.send({type:'capture:context',recordingId:id,context},env.content);
+  await env.send({type:'capture:context',recordingId:id,context},env.content);
+  assert.equal(env.state.macroStudioRecording.steps.length,0);
+  assert.equal(env.state.macroStudioRecording.fieldContexts[0].fields.length,1);
+  assert.equal('value' in env.state.macroStudioRecording.fieldContexts[0].fields[0],false);
+  for(const action of ['click','click','dblclick']) await env.send({type:'capture:event',recordingId:id,event:{action,target:{tag:'span',label:'열기'}}},env.content);
+  assert.deepEqual(env.state.macroStudioRecording.steps.map(step=>step.action),['dblclick']);
+});
+
+
+test('new internal frames pause capture once, open the panel notice without a new window and resume the same recording after permission',async()=>{
+  const env=await worker({permissions:['webNavigation']});
+  const id=(await env.send({type:'recording:start',tabId:42})).value.id;
+  await env.send({type:'capture:event',recordingId:id,event:{action:'click',target:{label:'열기'}}},env.content);
+  env.frames.push({frameId:9,url:'https://child.test/form?token=private'});
+  await env.lifecycle.committed({tabId:42,frameId:9});await env.lifecycle.navigation({tabId:42,frameId:9});
+  assert.equal(env.state.macroStudioRecording.id,id);assert.equal(env.state.macroStudioRecording.steps.length,1);
+  assert.equal(env.state.macroStudioRecording.permissionInterruptions,1);
+  assert.equal(env.calls.filter(call=>call[0]==='extension-message' && call[1].type==='panel:permissions').length,1);
+  assert.ok(!env.calls.some(call=>call[0]==='create-window'));
+  assert.ok((await env.send({type:'capture:event',recordingId:id,event:{action:'click',target:{label:'대기 중'}}},env.content)).value.ignored);
+  assert.equal((await env.send({type:'recording:permissions',id})).value.origins[0],'https://child.test');
+  env.origins.push('https://child.test/*');
+  await env.send({type:'recording:permissions',id});
+  assert.equal(env.state.macroStudioRecording.pendingFrameOrigins.length,0);
+  assert.equal(env.state.macroStudioRecording.id,id);assert.equal(env.state.macroStudioRecording.status,'recording');
+});
+
+test('other tabs do not interrupt recording and a failed reconnection preserves existing steps with an error',async()=>{
+  const env=await worker({permissions:['webNavigation']});
+  const id=(await env.send({type:'recording:start',tabId:42})).value.id;
+  env.frames.push({frameId:9,url:'https://child.test/form'});
+  await env.lifecycle.committed({tabId:99,frameId:9});
+  assert.equal(env.state.macroStudioRecording.pendingFrameOrigins,undefined);
+  await env.lifecycle.committed({tabId:42,frameId:9});env.origins.push('https://child.test/*');
+  env.chrome.scripting.executeScript=async()=>{throw new Error('frame disconnected');};
+  await env.send({type:'recording:permissions',id});
+  assert.equal(env.state.macroStudioRecording.id,id);assert.equal(env.state.macroStudioRecording.status,'error');
+  assert.match(env.state.macroStudioRecording.error,/연결/);
+});
+
+test('all management actions open only the current window side panel and reject unknown routes',async()=>{
+  const env=await worker();
+  for(const page of ['studio','library','scripts','privacy','reset','updates']) {
+    const reply=await env.send({type:'panel:open',windowId:7,page});assert.ok(reply.ok,reply.error);
+    assert.equal(env.local.macroStudioPanelRoutes[7],page);
+  }
+  for(const type of ['studio:open','library:open','local:open']) assert.ok((await env.send({type},env.content)).ok);
+  assert.equal((await env.send({type:'panel:open',windowId:7,page:'https://evil.test'})).ok,false);
+  assert.ok(!env.calls.some(call=>['create','create-window','update-tab'].includes(call[0])));
+});
+
+
+test('metadata rename is restricted to extension control pages',async()=>{
+ const env=await worker();
+ assert.equal((await env.send({type:'local:rename',id:'task',name:'새 이름'},env.content)).ok,false);
+ const result=await env.send({type:'local:rename',id:'task',name:'새 이름'});
+ assert.equal(result.ok,false);assert.match(result.error,/사용 준비/);
+});
+
+test('field preferences persist only for the sender site, are excluded from other sites and reset with personal settings',async()=>{
+ const env=await worker();
+ const patch={type:'scripts:field',id:'weekly-task',name:'place',fieldType:'text',action:'locked',enabled:true,value:'설정한 장소'};
+ const response=await env.send(patch,env.content);
+ assert.equal(response.ok,true);assert.equal(response.value.fieldPreferences['weekly-task'].place.value,'설정한 장소');
+ assert.equal((await env.send({...patch,id:'other-task'},env.content)).ok,false);
+ assert.equal((await env.send({...patch,fieldType:'password'},env.content)).ok,false);
+ const other={...env.content,url:'https://other.test/'};
+ assert.equal((await env.send({type:'scripts:state'},other)).value.fieldPreferences['weekly-task'],undefined);
+ assert.equal(env.local[FIELD_PREFERENCES_KEY]['weekly-task'].place.locked,true);
+ await env.send({type:'reset:confirm',confirmed:true},{...env.ui,url:'chrome-extension://studio/ui/reset.html'});
+ assert.equal(env.local[FIELD_PREFERENCES_KEY],undefined);
+});
+
+test('execution rename cannot write bundled macros or a local macro belonging to a different site',async()=>{
+ const env=await worker();
+ assert.equal((await env.send({type:'scripts:rename',id:'weekly-task',name:'변경'},env.content)).ok,false);
+ const other=await worker({stored:{snapshot:{scripts:[{id:'private-task',name:'개인',entries:[{matches:['https://other.test/*']}]}],entries:[]}}});
+ const response=await other.send({type:'scripts:rename',id:'private-task',name:'변경'},other.content);
+ assert.equal(response.ok,false);assert.match(response.error,/연결한 폴더/);
 });

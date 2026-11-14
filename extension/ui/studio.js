@@ -3,11 +3,17 @@ import { sitePattern } from '../recorder/frames.js';
 import { folderReady, scriptsPath } from '../core/script-setup.js';
 const $ = selector => document.querySelector(selector);
 const DRAFT_KEY = 'macroStudioStudioDraft';
-let draftWrites = Promise.resolve(), restoringDraft = true;
+let draftWrites = Promise.resolve(), restoringDraft = true, migrateDraft = false;
+let copiedPrompt = null, copyRequest = 0;
+function updateCopyFeedback() {
+  const copied = !!copiedPrompt && copiedPrompt === $('#preview').value;
+  $('#prompt').dataset.copyState = copied ? 'success' : 'idle';
+  $('#prompt-label').textContent = copied ? '복사됨' : '에이전트용 지시문 복사';
+}
 const updateLocked = [];
 function saveDraft() {
   if (restoringDraft) return draftWrites;
-  const draft = Object.fromEntries(['name', 'goal', 'variables'].map(id => [id, $('#' + id).value]));
+  const draft = Object.fromEntries(['name', 'goal'].map(id => [id, $('#' + id).value]));
   draftWrites = draftWrites.catch(() => {}).then(() => chrome.storage.session.set({ [DRAFT_KEY]: draft }));
   return draftWrites;
 }
@@ -20,13 +26,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === 'studio:reset') {
     restoringDraft = true;
     draftWrites.catch(() => {}).then(() => {
-      $('#name').value = '나의 자동화'; $('#goal').value = $('#variables').value = '';
+      $('#name').value = '나의 자동화'; $('#goal').value = '';
       updatePreview(); restoringDraft = false; respond({ saved: true });
     });
     return true;
   }
   if (message.type === 'update:prepare') {
-    for (const id of ['name', 'goal', 'variables']) if (!$('#' + id).disabled) {
+    for (const id of ['name', 'goal']) if (!$('#' + id).disabled) {
       $('#' + id).disabled = true; updateLocked.push($('#' + id));
     }
     saveDraft().then(() => respond({ saved: true }), () => respond({ saved: false }));
@@ -36,7 +42,6 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 });
 let recording = null, active = null;
 let setupState = null, creationOpened = false, siteReadinessSignature = '';
-const excludedFrames = new Set();
 let frameInfo = null, frameSignature = '', frameRequest = 0, framePending = false, frameAgain = false, permissionBusy = false;
 const selectedFrames = new Set();
 const targetTabId = () => recording?.status === 'recording' ? recording.tabId : active?.id;
@@ -44,29 +49,30 @@ const status = (message, error = false) => {
   $('#status').textContent = message; $('#status').dataset.error = error;
   if ($('#macro-workspace').hidden) { $('#site-status').textContent = message; $('#site-status').dataset.error = String(error); }
 };
-const baseReady = () => folderReady(setupState) && setupState.enabled;
+const baseReady = () => folderReady(setupState) && setupState.enabled && !(setupState.missingOrigins || []).length;
 function siteReadiness() {
   const current = frameInfo?.tabId === targetTabId() ? frameInfo : null;
   if (!current) return { ready: false, detail: '자동화할 웹사이트 탭을 열어주세요' };
   if (!current.topAllowed) return { ready: false, detail: '아래의 ‘이 사이트에서 사용하기’를 누르고 Chrome에서 허용하세요' };
   if (current.siteEnabled === false) return { ready: false, detail: '‘이 사이트에서 사용하기’를 눌러 사이트 적용을 켜세요' };
   if (!current.detectionEnabled) return { ready: false, detail: '아래의 ‘내부 화면 자동 감지 켜기’를 눌러 확인하세요' };
-  const missing = current.frames.filter(frame => !frame.allowed && !excludedFrames.has(frame.pattern));
-  return { ready: !missing.length, detail: missing.length ? '필요한 내부 주소를 허용하거나 관계없는 주소를 제외하세요' : '현재 사이트와 선택한 내부 화면의 접근 확인 완료' };
+  const missing = current.frames.filter(frame => !frame.allowed);
+  return { ready: !missing.length, detail: missing.length ? '감지된 내부 화면의 접근을 모두 허용해야 다음 단계로 넘어갈 수 있습니다' : '현재 사이트와 내부 화면의 접근 확인 완료' };
 }
 const creationReady = () => baseReady() && siteReadiness().ready;
 function creationControls() {
   const ready = creationReady(), busy = recording?.status === 'recording';
+  creationOpened ||= ready;
   $('#open-creation').disabled = !ready || busy;
   $('#open-creation').hidden = creationOpened && ready;
   $('#macro-workspace').hidden = !(creationOpened && ready) && !busy;
   $('#name').disabled = busy || !ready;
-  $('#goal').disabled = $('#variables').disabled = !ready || busy;
+  $('#goal').disabled = !ready || busy;
   $('#prompt').disabled = !ready || !creationOpened || !recording?.steps.length || busy;
   $('#download').disabled = !recording?.steps.length || busy;
-  $('#creation-gate').textContent = !folderReady(setupState) ? '1. 사용 폴더를 연결하고 전체 저장 경로를 확인하세요.' :
-    !setupState.enabled ? '2. Chrome의 사용자 스크립트 허용을 켜고 허용 상태를 다시 확인하세요.' :
-    !siteReadiness().ready ? '3. 사이트 접근 안내에 따라 자동화할 사이트를 확인하세요.' :
+  $('#creation-gate').textContent = !folderReady(setupState) ? '폴더 읽기·쓰기와 저장 경로를 확인하세요.' :
+    !setupState.enabled ? 'Chrome의 사용자 스크립트 허용을 켜세요.' :
+    !siteReadiness().ready ? '자동화할 사이트의 접근을 허용하세요.' :
     creationOpened ? '' : '준비가 끝났습니다. 작업을 기록해 매크로를 만드세요.';
   $('#creation-gate').hidden = creationOpened && ready;
   $('#open-creation').textContent = ready ? '작업 기록하기' : '사용 준비를 먼저 완료하세요';
@@ -108,17 +114,15 @@ function permissionControls() {
   const current = frameInfo?.tabId === targetTabId() ? frameInfo : null;
   $('#allow').disabled = permissionBusy || !baseReady() || !Number.isInteger(targetTabId());
   $('#allow').textContent = current?.topAllowed && current.siteEnabled !== false ? current.detectionEnabled ? '기록기 다시 연결' : '내부 화면 자동 감지 켜기' : '이 사이트에서 사용하기';
-  $('#start').disabled = permissionBusy || !creationOpened || !creationReady() || recording?.status === 'recording';
+  $('#start').disabled = permissionBusy || !creationReady() || recording?.status === 'recording';
   const missing = (current?.frames || []).filter(frame => !frame.allowed);
   $('#allow-frames').hidden = !missing.length;
   $('#allow-frames').disabled = permissionBusy || !baseReady() || !missing.some(frame => selectedFrames.has(frame.pattern));
-  $('#skip-frames').hidden = !missing.some(frame => !excludedFrames.has(frame.pattern) && !selectedFrames.has(frame.pattern));
-  $('#skip-frames').disabled = permissionBusy || !baseReady();
   for (const checkbox of $('#frame-sites').querySelectorAll('input')) checkbox.disabled = permissionBusy;
   creationControls();
 }
 function renderFrames(info) {
-  if (frameInfo?.tabId !== info.tabId || frameInfo?.origin !== info.origin) { selectedFrames.clear(); excludedFrames.clear(); }
+  if (frameInfo?.tabId !== info.tabId || frameInfo?.origin !== info.origin) selectedFrames.clear();
   const missing = info.frames.filter(frame => !frame.allowed);
   for (const pattern of selectedFrames) if (!missing.some(frame => frame.pattern === pattern)) selectedFrames.delete(pattern);
   frameInfo = info;
@@ -146,7 +150,7 @@ function renderFrames(info) {
     }
   }
   const text = !info.detectionEnabled ? '한 번 켜두면 내부 화면 주소를 자동으로 확인합니다. 주소를 직접 입력할 필요가 없습니다.' :
-    missing.length ? '아직 허용하지 않은 내부 사이트 ' + missing.length + '곳을 발견했습니다. 기록할 화면만 선택하세요. 광고 등은 선택하지 않아도 됩니다.' :
+    missing.length ? '아직 허용하지 않은 내부 사이트 ' + missing.length + '곳을 발견했습니다. 접근을 모두 허용한 뒤 계속하세요.' :
     info.frames.length ? '발견한 내부 사이트는 모두 허용되어 있습니다. 추가 권한 요청 없이 기록할 수 있습니다.' : '추가 권한이 필요한 내부 화면이 없습니다.';
   if ($('#frame-status').textContent !== text) $('#frame-status').textContent = text;
   $('#frame-status').dataset.error = 'false';
@@ -172,14 +176,17 @@ async function refreshFrames(force = false) {
 const payload = () => ({ ...recording, name: $('#name').value || recording.name });
 function updatePreview() {
   $('#preview').value = recording && creationReady() ? agentPrompt(payload(), {
-    goal: $('#goal').value, variables: $('#variables').value, standalone: true,
+    goal: $('#goal').value, standalone: true,
     scriptsPath: scriptsPath(setupState.folderPath, setupState.folderRelativePath)
   }) : '';
+  if (copiedPrompt !== $('#preview').value) copiedPrompt = null;
+  updateCopyFeedback();
 }
 function render(state) {
   recording = state;
   const busy = state?.status === 'recording';
   $('#stop').disabled = !busy;
+  $('#recording-permissions').hidden = !busy || !state.pendingFrameOrigins?.length;
   $('#name').disabled = !!busy;
   $('#prompt').disabled = $('#download').disabled = !state?.steps.length || !!busy;
   $('#clear').disabled = !state || !!busy;
@@ -190,7 +197,8 @@ function render(state) {
     const li = document.createElement('li'); li.className = 'step';
     const content = document.createElement('div'); content.className = 'step-content';
     const title = document.createElement('div'); title.className = 'step-title';
-    title.textContent = (index + 1) + '. ' + ({ click: '클릭', input: '입력', change: '변경', navigation: '화면 이동', submit: '제출' }[step.action] || step.action) + ' · ' + (step.target.label || step.target.sapField || step.target.name || step.target.tag || '페이지');
+    title.textContent = (index + 1) + '. ' + ({ click: '클릭', dblclick:'더블클릭',contextmenu:'오른쪽 클릭',auxclick:'보조 클릭', input: '입력', change: step.evidence === 'context-change' ? '연관 값 변경' : '변경', navigation: '화면 이동', submit: '제출' }[step.action] || step.action) + ' · ' + (step.target.label || step.target.sapField || step.target.name || step.target.tag || '페이지');
+    if (step.target.opaque) title.textContent += ' · 내부 요소 확인 필요';
     const url = document.createElement('div'); url.className = 'step-url'; url.textContent = step.page.url + (step.frameId ? ' · iframe' : '');
     const value = document.createElement('div'); value.className = 'step-value'; value.textContent = step.mode === 'variable' ? '실행할 때 입력: ' + (step.variable || step.target.label || '값') : String(step.value);
     const remove = document.createElement('button'); remove.className = 'step-delete'; remove.textContent = '삭제'; remove.disabled = !!busy;
@@ -200,10 +208,15 @@ function render(state) {
   }
   updatePreview();
   permissionControls();
-  if (busy) status('● 기록 중 · 웹페이지에서 평소 작업을 진행하세요. ' + state.steps.length + '/' + MAX_STEPS + '단계' + (state.note ? '\n' + state.note : ''));
+  if (busy && state.pendingFrameOrigins?.length) status('기록 일시정지 · 새 내부 사이트를 허용해주세요. 기존 ' + state.steps.length + '단계는 보존됩니다.');
+  else if (busy) status('● 기록 중 · 웹페이지에서 평소 작업을 진행하세요. ' + state.steps.length + '/' + MAX_STEPS + '단계' + (state.note ? '\n' + state.note : ''));
   else if (state?.status === 'error') status(state.error || '기록 연결에 실패했습니다.', true);
   else if (state) status(state.note || '기록을 끝냈습니다. 값을 확인하고 에이전트에게 전달하세요.');
 }
+$('#recording-permissions').addEventListener('click', async () => {
+  try { await window.MacroStudioPanel.permissions(); }
+  catch (error) { status(error.message, true); }
+});
 $('#allow').addEventListener('click', async () => {
   if (!baseReady()) return;
   const tabId = targetTabId();
@@ -240,11 +253,6 @@ $('#allow-frames').addEventListener('click', async () => {
   } catch (error) { status(error.message, true); }
   finally { permissionBusy = false; permissionControls(); }
 });
-$('#skip-frames').addEventListener('click', () => {
-  if (!baseReady() || permissionBusy) return;
-  for (const frame of frameInfo?.frames || []) if (!frame.allowed && !selectedFrames.has(frame.pattern)) excludedFrames.add(frame.pattern);
-  permissionControls(); updatePreview();
-});
 $('#open-creation').addEventListener('click', async () => {
   try {
     await refreshSetup(); await refreshFrames(true);
@@ -271,7 +279,6 @@ $('#stop').addEventListener('click', async () => {
     const frames = [...new Set([0, ...(state?.steps || []).map(step => step.frameId)])];
     await Promise.allSettled(frames.map(frameId => chrome.tabs.sendMessage(state.tabId, { type: 'capture:flush' }, { frameId })));
     render(await request('recording:stop'));
-    $('#record-details').open = !!recording?.steps.length;
     await refreshFrames(true);
   } catch (error) { status(error.message, true); $('#stop').disabled = false; }
 });
@@ -281,8 +288,18 @@ $('#prompt').addEventListener('click', async () => {
     if (!creationOpened || !creationReady() || recording?.status === 'recording' || !recording?.steps.length) throw new Error('사용 준비를 완료하고 기록을 끝낸 뒤 복사하세요.');
     updatePreview();
   } catch (error) { status(error.message, true); return; }
-  try { await navigator.clipboard.writeText($('#preview').value); status('복사했습니다. Codex 또는 Claude Code 채팅에 붙여넣으세요. 저장 위치는 지시문에 포함했습니다.'); }
-  catch { $('#preview').closest('details').open = true; $('#preview').focus(); $('#preview').select(); status('미리보기에서 직접 복사하세요.'); }
+  const text = $('#preview').value, requestId = ++copyRequest;
+  try {
+    await navigator.clipboard.writeText(text);
+    if (requestId !== copyRequest) return;
+    copiedPrompt = text === $('#preview').value ? text : null;updateCopyFeedback();
+    status('복사했습니다. Codex 또는 Claude Code 채팅에 붙여넣으세요.');
+  } catch {
+    if (requestId !== copyRequest) return;
+    copiedPrompt = null;updateCopyFeedback();
+    $('#preview').closest('details').open = true;$('#preview').focus();$('#preview').select();
+    status('복사하지 못했습니다. 미리보기에서 직접 복사하세요.',true);
+  }
 });
 $('#download').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(exportRecording(payload()), null, 2)], { type: 'application/json' });
@@ -291,7 +308,7 @@ $('#download').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 $('#clear').addEventListener('click', async () => { try { render(await request('recording:clear')); status('현재 기록을 지웠습니다.'); } catch (error) { status(error.message, true); } });
-for (const selector of ['#name', '#goal', '#variables']) $(selector).addEventListener('input', () => {
+for (const selector of ['#name', '#goal']) $(selector).addEventListener('input', () => {
   updatePreview(); saveDraft().catch(error => status(error.message, true));
 });
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'session' && changes.macroStudioRecording) render(changes.macroStudioRecording.newValue || null); });
@@ -312,7 +329,12 @@ try {
 await refreshFrames(true);
 try {
   const draft = (await chrome.storage.session.get(DRAFT_KEY))[DRAFT_KEY];
-  for (const id of ['name', 'goal', 'variables']) if (typeof draft?.[id] === 'string') $('#' + id).value = draft[id];
+  for (const id of ['name', 'goal']) if (typeof draft?.[id] === 'string') $('#' + id).value = draft[id];
+  if (typeof draft?.variables === 'string' && draft.variables.trim()) {
+    $('#goal').value = [$('#goal').value, '입력 항목 참고: ' + draft.variables.trim()].filter(Boolean).join('\n\n');
+    migrateDraft = true;
+  }
   updatePreview();
 } catch { /* Recording data remains available even if draft storage is unavailable. */ }
 restoringDraft = false;
+if (migrateDraft) saveDraft().catch(error => status(error.message, true));

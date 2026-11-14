@@ -1,0 +1,44 @@
+{
+  "version": "1.4.0",
+  "buildId": "fc49aa00307cb723fb57e6a07277ed12f8bbe3d63fb8c3e5e9eecbcd1c172aab",
+  "date": "2026-11-14",
+  "source": "dist-store actual UI with synthetic runtime fixture; no personal data",
+  "results": [
+    {
+      "scene": "recording",
+      "store": "docs/store-assets/01-recording.png",
+      "storeSize": [
+        1280,
+        800
+      ],
+      "website": "website/assets/features/recording.jpg"
+    },
+    {
+      "scene": "agent",
+      "store": "docs/store-assets/02-agent.png",
+      "storeSize": [
+        1280,
+        800
+      ],
+      "website": "website/assets/features/agent.jpg"
+    },
+    {
+      "scene": "launcher",
+      "store": "docs/store-assets/03-launcher.png",
+      "storeSize": [
+        1280,
+        800
+      ],
+      "website": "website/assets/features/launcher.jpg"
+    },
+    {
+      "scene": "library",
+      "store": "docs/store-assets/04-library.png",
+      "storeSize": [
+        1280,
+        800
+      ],
+      "website": null
+    }
+  ]
+}

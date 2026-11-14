@@ -19,6 +19,9 @@ export function scriptsPath(folderPath, relativePath = []) {
   return [root, ...relativePath].join('/');
 }
 export function folderReady(state) {
-  if (!state?.connected || !state.readable || state.error) return false;
+  if (!state?.connected || !state.readable || !state.writable || state.error) return false;
   try { normalizeFolderPath(state.folderPath, state.folderName); return true; } catch { return false; }
+}
+export function setupReady(state) {
+  return folderReady(state) && !!state.enabled && !(state.missingOrigins || []).length;
 }

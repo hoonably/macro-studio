@@ -125,7 +125,8 @@ test('library screen archives and restores; deletion requires confirmation and a
       return { ok: true, value: structuredClone(state) };
     } }, storage: { onChanged: { addListener: callback => { changed = callback; } } }
   };
-  await vm.runInContext('(async () => {' + await code('extension/ui/library.js') + '\n})()', ctx);
+  vm.runInContext((await code('extension/ui/script-name-editor.js')).replace('export function','function') + ';globalThis.scriptName=scriptName;', ctx);
+  await vm.runInContext('(async () => {' + (await code('extension/ui/library.js')).replace(/^import[^\n]+\n/gm, '') + '\n})()', ctx);
   const buttons = list => [...document.querySelectorAll(list + ' button')];
   assert.equal(document.querySelector('#active-scripts img'), null, 'Script names are rendered as text');
   const card = document.querySelector('#active-scripts li');
@@ -194,4 +195,134 @@ test('explicit ON provides creation on empty/deleted sites; OFF blocks stale con
   assert.equal(shadow.querySelector('.studio-open').disabled, true);
   finish(); await tick();
   assert.equal(host.hidden, true);
+});
+
+test('common launcher locks and hides values, restores fields, and preserves locks after execution failure',async()=>{
+ const {ctx,window,document}=context();window.MacroStudio={features:{}};
+ await load(ctx,'extension/ui/launcher.js');const app=window.MacroStudio.launcher.create();let received;
+ app.register({id:'task',name:'샘플',fields:[{name:'place',label:'장소',value:'기본 장소'},{name:'time',label:'시각',type:'select',value:'09',options:[{value:'09',label:'오전 9시'}]}],run:async values=>{received=values;throw Error('테스트 중단');}});
+ app.applyLibraryState({ready:true,siteEnabled:true,archived:[],deleted:[]});
+ const root=document.getElementById('macro-studio-launcher').shadowRoot;root.querySelector('.script').click();
+ const field=name=>[...root.querySelectorAll('.field')].find(row=>row.dataset.fieldName===name);
+ field('place').querySelector('input').value='내 장소';field('place').querySelector('[data-studio-action="field-lock"]').click();
+ assert.equal(field('place').querySelector('input').disabled,true);
+ field('place').querySelector('[data-studio-action="field-hide"]').click();assert.equal(field('place').hidden,true);
+ assert.match(root.querySelector('.hidden-fields summary').textContent,/1개/);
+ assert.equal(root.querySelector('.hidden-list small').textContent,'내 장소');
+ root.querySelector('.back').click();root.querySelector('.script').click();assert.equal(field('place').hidden,true);
+ const form=root.querySelector('form');form.reportValidity=()=>true;form.dispatchEvent(new window.Event('submit',{cancelable:true}));await tick();
+ assert.equal(received.place,'내 장소');assert.equal(received.time,'09');
+ assert.equal(field('place').querySelector('input').disabled,true,'The lock remains after a failed run');
+ root.querySelector('.hidden-list .field-action').click();assert.equal(field('place').hidden,false);
+ field('place').querySelector('[data-studio-action="field-lock"]').click();assert.equal(field('place').querySelector('input').disabled,false);
+});
+
+test('trusted launcher field clicks persist through the isolated bridge while synthetic clicks do not write',async()=>{
+ const {ctx,window,document}=context();window.MacroStudio={features:{}};delete window.__macroStudioEntryInstalled;
+ let state={ready:true,siteEnabled:true,archived:[],deleted:[],fieldPreferences:{}};const calls=[];
+ ctx.CustomEvent=window.CustomEvent;ctx.MutationObserver=window.MutationObserver;
+ ctx.chrome={runtime:{onMessage:{addListener(){}},getManifest:()=>({content_scripts:[{world:'MAIN',matches:['https://example.test/*']}]}),sendMessage:async message=>{
+  calls.push(message);
+  if(message.type==='scripts:field')state={...state,fieldPreferences:{task:{place:{type:'text',locked:message.action==='locked'&&message.enabled,hidden:message.action==='hidden'&&message.enabled,value:message.value}}}};
+  return {ok:true,value:message.type==='local:connect'?{}:structuredClone(state)};
+ }},storage:{onChanged:{addListener(){}}}};
+ await load(ctx,'extension/ui/launcher.js');const app=window.MacroStudio.launcher.create();app.register({id:'task',name:'샘플',fields:[{name:'place',label:'장소',value:'기본'}],run:async()=>{}});
+ await load(ctx,'extension/core/studio-entry.js');await tick();
+ const host=document.getElementById('macro-studio-launcher'),root=host.shadowRoot;root.querySelector('.script').click();
+ root.querySelector('[data-studio-action="field-lock"]').click();await tick();assert.equal(calls.filter(call=>call.type==='scripts:field').length,0);
+ host.dispatchEvent(new window.CustomEvent('macro-studio:library-state',{detail:JSON.stringify(state)}));
+ const input=root.querySelector('.fields input');input.value='확인한 값';input.checkValidity=()=>true;
+ const button=root.querySelector('[data-studio-action="field-lock"]');const event=new window.Event('click',{cancelable:true});Object.defineProperty(event,'isTrusted',{value:true});event.composedPath=()=>[button,root,host,document,window];document.dispatchEvent(event);await tick();
+ assert.equal(calls.filter(call=>call.type==='scripts:field').length,1);assert.equal(state.fieldPreferences.task.place.value,'확인한 값');
+ assert.equal(root.querySelector('.fields input').disabled,true);
+});
+
+test('invalid required inputs cannot be locked or hidden, while persisted select settings restore the actual value',async()=>{
+ const {ctx,window,document}=context();window.MacroStudio={features:{}};await load(ctx,'extension/ui/launcher.js');
+ const app=window.MacroStudio.launcher.create();app.register({id:'task',name:'샘플',fields:[{name:'time',label:'시각',type:'select',value:'08',required:true,options:[{value:'08',label:'오전 8시'},{value:'10',label:'오전 10시'}]}],run:async()=>{}});
+ app.applyLibraryState({ready:true,archived:[],deleted:[],fieldPreferences:{task:{time:{type:'select',locked:true,hidden:true,value:'10'}}}});
+ const root=document.getElementById('macro-studio-launcher').shadowRoot;root.querySelector('.script').click();
+ assert.equal(root.querySelector('select').value,'10');assert.equal(root.querySelector('select').disabled,true);assert.equal(root.querySelector('.field').hidden,true);
+ root.querySelector('.hidden-list .field-action').click();root.querySelector('[data-studio-action="field-lock"]').click();
+ const input=root.querySelector('select');input.checkValidity=()=>false;
+ root.querySelector('[data-studio-action="field-hide"]').click();assert.equal(root.querySelector('.field').hidden,false);assert.equal(input.disabled,false);
+ assert.match(root.querySelector('.field-feedback').textContent,/올바르게 입력/);
+});
+
+test('saving field settings and background refreshes preserve an open form and unsaved inputs; genuine OFF still closes it',async()=>{
+ const {ctx,window,document}=context();window.MacroStudio={features:{}};delete window.__macroStudioEntryInstalled;
+ let state={ready:true,siteEnabled:true,archived:[],deleted:[],fieldPreferences:{}},changed,hold=false,resolveState;
+ const calls=[];
+ ctx.CustomEvent=window.CustomEvent;ctx.MutationObserver=window.MutationObserver;
+ ctx.chrome={runtime:{onMessage:{addListener(){}},getManifest:()=>({content_scripts:[{world:'MAIN',matches:['https://example.test/*']}]}),sendMessage:async message=>{
+  calls.push(message.type);
+  if(message.type==='local:connect')return {ok:true,value:{}};
+  if(message.type==='scripts:field'){
+   const before=state.fieldPreferences.task?.place||{locked:false,hidden:false};
+   state={...state,fieldPreferences:{task:{place:{...before,type:'text',[message.action]:message.enabled,value:message.value}}}};
+   changed({macroStudioFieldPreferences:{newValue:state.fieldPreferences}},'local');
+  }
+  if(message.type==='scripts:state'&&hold)return await new Promise(resolve=>{resolveState=resolve;});
+  return {ok:true,value:structuredClone(state)};
+ }},storage:{onChanged:{addListener:callback=>{changed=callback;}}}};
+ await load(ctx,'extension/ui/launcher.js');const app=window.MacroStudio.launcher.create();
+ app.register({id:'task',name:'샘플',fields:[{name:'place',label:'장소',value:'기본'},{name:'note',label:'메모',value:'원래 메모'}],run:async()=>{}});
+ await load(ctx,'extension/core/studio-entry.js');await tick();
+ const host=document.getElementById('macro-studio-launcher'),root=host.shadowRoot;
+ root.querySelector('.orb').click();root.querySelector('.script').click();root.querySelector('input[name=note]').value='작성 중인 메모';
+ const click=async selector=>{
+  root.querySelector('input[name=place]').checkValidity=()=>true;
+  const button=root.querySelector(selector),event=new window.Event('click',{cancelable:true});
+  assert.ok(button);Object.defineProperty(event,'isTrusted',{value:true});event.composedPath=()=>[button,root,host,document,window];document.dispatchEvent(event);await tick();
+  assert.equal(root.querySelector('.panel').hidden,false,'A storage notification must never close the execution form');
+  assert.equal(root.querySelector('.config').hidden,false);
+  assert.equal(root.querySelector('input[name=note]').value,'작성 중인 메모');
+ };
+ await click('[data-studio-action="field-lock"]');
+ assert.equal(root.querySelector('input[name=place]').disabled,true);
+ await click('.field[data-field-name=place] [data-studio-action="field-hide"]');
+ assert.equal(root.querySelector('.field[data-field-name=place]').hidden,true);
+ await click('.hidden-list .field-action');
+ assert.equal(root.querySelector('.field[data-field-name=place]').hidden,false);
+ assert.equal(root.querySelector('input[name=place]').disabled,true);
+ await click('[data-studio-action="field-lock"]');
+ assert.equal(root.querySelector('input[name=place]').disabled,false);
+ assert.equal(calls.filter(type=>type==='local:connect').length,1,'Field preferences do not reconnect or replace script definitions');
+ // A full script refresh can take time too. Retain the last acknowledged form.
+ hold=true;changed({macroStudioLocalScripts:{oldValue:{revision:'old'},newValue:{revision:'new'}}},'local');await tick();
+ assert.equal(root.querySelector('.panel').hidden,false);assert.equal(root.querySelector('input[name=note]').value,'작성 중인 메모');
+ resolveState({ok:true,value:structuredClone(state)});await tick();hold=false;
+ assert.equal(root.querySelector('.panel').hidden,false);
+ root.querySelector('.close').click();changed({macroStudioFieldPreferences:{newValue:{}}},'local');await tick();
+ assert.equal(root.querySelector('.panel').hidden,true,'Refreshing does not reopen a manually closed window');
+ root.querySelector('.orb').click();root.querySelector('.script').click();
+ state={...state,siteEnabled:false};changed({macroStudioSites:{newValue:{}}},'local');await tick();
+ assert.equal(root.querySelector('.panel').hidden,true,'Confirmed site OFF still closes the window');
+});
+
+test('execution title rename saves only trusted actions, keeps drafts on failure and preserves execution inputs on success',async()=>{
+ const {ctx,window,document}=context();window.MacroStudio={features:{}};delete window.__macroStudioEntryInstalled;
+ let state={ready:true,siteEnabled:true,archived:[],deleted:[],fieldPreferences:{}},fail=false;const calls=[];
+ ctx.CustomEvent=window.CustomEvent;ctx.MutationObserver=window.MutationObserver;
+ ctx.chrome={runtime:{onMessage:{addListener(){}},getManifest:()=>({content_scripts:[{world:'MAIN',matches:['https://example.test/*']}]}),sendMessage:async message=>{
+  calls.push(message);
+  if(message.type==='scripts:rename')return fail?{ok:false,error:'폴더 쓰기 권한 필요'}:{ok:true,value:{...state,renamed:{id:message.id,name:message.name}}};
+  return {ok:true,value:message.type==='local:connect'?{}:structuredClone(state)};
+ }},storage:{onChanged:{addListener(){}}}};
+ await load(ctx,'extension/ui/launcher.js');const app=window.MacroStudio.launcher.create();
+ app.register({id:'task',name:'원래 이름',local:{id:'task',revision:'v1'},fields:[{name:'note',label:'메모',value:'기본'}],run:async()=>{}});
+ await load(ctx,'extension/core/studio-entry.js');await tick();
+ const host=document.getElementById('macro-studio-launcher'),root=host.shadowRoot;root.querySelector('.orb').click();root.querySelector('.script').click();
+ root.querySelector('input[name=note]').value='실행 초안';root.querySelector('.rename-open').click();
+ const name=root.querySelector('.macro-name');name.value='수정한 이름';
+ assert.equal(root.querySelector('form').contains(name),false,'Name edits never enter the execution payload');
+ root.querySelector('.rename-save').click();await tick();assert.equal(calls.some(call=>call.type==='scripts:rename'),false);
+ root.querySelector('.rename-cancel').click();assert.equal(root.querySelector('.macro-name-editor').hidden,true);assert.equal(root.querySelector('.config h2').textContent,'원래 이름');
+ root.querySelector('.rename-open').click();name.value='새 이름';
+ const trusted=async(type,key)=>{const target=type==='click'?root.querySelector('.rename-save'):name,event=new window.Event(type,{cancelable:true});Object.defineProperty(event,'isTrusted',{value:true});if(key)Object.defineProperty(event,'key',{value:key});event.composedPath=()=>[target,root,host,document,window];document.dispatchEvent(event);await tick();};
+ fail=true;await trusted('click');assert.equal(root.querySelector('.macro-name-editor').hidden,false);assert.equal(name.value,'새 이름');assert.match(root.querySelector('.name-feedback').textContent,/쓰기 권한/);
+ fail=false;await trusted('keydown','Enter');
+ assert.equal(root.querySelector('.macro-name-editor').hidden,true);assert.equal(root.querySelector('.config h2').textContent,'새 이름');
+ assert.equal(root.querySelector('.panel').hidden,false);assert.equal(root.querySelector('input[name=note]').value,'실행 초안');
+ assert.equal(root.querySelector('.script-copy strong').textContent,'새 이름');
 });

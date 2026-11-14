@@ -11,11 +11,24 @@
   const scriptIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5M8 16h8"/></svg>`;
   const archiveIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 8h16v12H4zM3 4h18v4H3zM9 12h6"/></svg>`;
 
+  const fieldIcons = {
+    locked: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    unlocked: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/>',
+    hide: '<path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9 5.5a11 11 0 0 1 12 6.5 15 15 0 0 1-4 4M6 6a15 15 0 0 0-3 6s3 7 9 7a10 10 0 0 0 4-.8"/>',
+    edit: '<path d="m16 4 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L5 15 4 20Z"/>',
+    save: '<path d="m5 12 4 4L19 6"/>',
+    cancel: '<path d="m6 6 12 12M18 6 6 18"/>',
+    show: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>'
+  };
+  const fieldIcon = name => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + fieldIcons[name] + '</svg>';
+  const configurableTypes = new Set(['text','select','date','time','number','email','url','tel','search','datetime-local']);
+
   function create() {
     if (helper.launcher.app) return helper.launcher.app;
     const definitions = new Map(), savedValues = new Map(), pendingDefinitions = new Map();
-    let selected = null, busy = false, opened = false, position, drag = null, suppressClickUntil = 0;
-    let library = { ready: false, archived: [], deleted: [], pending: null };
+    let nameEditing = null;
+    let selected = null, busy = false, opened = false, position, drag = null, suppressClickUntil = 0, configRefresh = false;
+    let library = { ready: false, archived: [], deleted: [], pending: null, fieldPreferences: {} };
     const host = document.createElement("div");
     host.id = HOST_ID;
     host.hidden = true;
@@ -25,8 +38,8 @@
       <style>
         :host{all:initial;color-scheme:light} *{box-sizing:border-box}
         [hidden]{display:none!important}
-        .empty{font-size:12px;color:#758297}.studio-open{width:100%;margin-top:12px;padding:11px;border:1px dashed #b5c9e4;border-radius:12px;background:white;color:#145fc0}button,input{font:inherit} button{cursor:pointer} button:disabled{cursor:default;opacity:.55}
-        button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #8bb9ff;outline-offset:3px}
+        .empty{font-size:12px;color:#5c6e86}.studio-open{width:100%;margin-top:12px;padding:11px;border:1px dashed #b5c9e4;border-radius:12px;background:white;color:#145fc0}button,input,select{font:inherit} button{cursor:pointer} button:disabled{cursor:default;opacity:.55}
+        button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #8bb9ff;outline-offset:3px}
         .orb{position:relative;width:48px;height:48px;display:grid;place-items:center;border:1px solid #ffffff55;
           border-radius:12px;background:#2A3C91;color:#fff;box-shadow:0 4px 16px #173a6540;
           padding:0;touch-action:none;user-select:none;cursor:grab}
@@ -36,12 +49,12 @@
         .badge[data-state="running"]{background:#f59e0b}.badge[data-state="error"]{background:#dc2626}
         .panel{position:absolute;width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 24px);
           overflow:auto;overscroll-behavior:contain;border:1px solid #dbe3ed;border-radius:18px;background:#fff;
-          box-shadow:0 12px 44px #172b4d30;color:#1c2b40;font:14px/1.5 system-ui,-apple-system,sans-serif}
+          box-shadow:0 12px 44px #00000026;color:#1c2b40;font:14px/1.5 system-ui,-apple-system,sans-serif}
         header{display:flex;align-items:center;gap:9px;padding:16px 16px 12px;border-bottom:1px solid #eef2f7}
-        .brand{flex:1;min-width:0}.brand strong{display:block;font-size:15px}.brand span{font-size:11px;color:#758297}
+        .brand{flex:1;min-width:0}.brand strong{display:block;font-size:15px}.brand span{font-size:11px;color:#5c6e86}
         .quiet{display:grid;place-items:center;border:0;background:transparent;color:#63748a;width:28px;height:28px;
           border-radius:8px;font-size:21px;padding:0}.quiet:hover{background:#f0f4fa}
-        main{padding:16px}.eyebrow{margin:0 0 10px;font-size:11px;color:#718098;letter-spacing:.03em}
+        main{padding:16px}
         .script-row{display:flex;gap:6px;align-items:center}.script-row+.script-row{margin-top:8px}
         .script-archive{flex:none;width:32px;height:36px;font-size:14px}.script-archive svg{width:18px;height:18px}
         .library-open{border:0;background:transparent;color:#61728a;padding:10px 0 0;font-size:12px}
@@ -51,17 +64,31 @@
         .script:hover{border-color:#8eb5ec;background:#eff6ff}
         .script-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:#e8f0ff;color:#145fc0}
         .script-icon svg{width:21px;height:21px}.script-copy{flex:1;min-width:0}
-        .script-copy strong{display:block;font-size:13px}.script-copy small{display:block;color:#718098;font-size:11px;margin-top:3px}
+        .script-copy strong{display:block;font-size:13px}.script-copy small{display:block;color:#5c6e86;font-size:11px;margin-top:3px}
         .chevron{color:#8b9bb0;font-size:20px}
         h2{font-size:16px;margin:0 0 4px;letter-spacing:-.02em}.description{color:#6c7b90;font-size:12px;margin:0 0 17px}
-        .field{display:block;font-weight:600;font-size:12px;margin-bottom:7px}
-        input{display:block;width:100%;min-height:42px;padding:9px 11px;margin-top:6px;border:1px solid #c7d3e2;
+        .field{display:block;font-weight:600;font-size:12px;margin-bottom:12px;min-width:0}
+        .field-heading{display:flex;align-items:center;gap:8px;min-height:28px}.field-heading label{flex:1;min-width:0;overflow-wrap:anywhere}
+        .field-actions{display:flex;gap:2px;flex:none}.field-action{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:5px;border:0;border-radius:7px;background:transparent;color:#5c6e86}
+        .field-action svg{width:16px;height:16px}.field-action:hover:enabled{background:#edf3fb;color:#145fc0}
+        .field-action[aria-pressed=true]{color:#145fc0;background:#edf3fb}
+        .field[data-locked=true] :is(input,select){background:#f3f5f8;color:#526175;-webkit-text-fill-color:#526175;opacity:1}
+        .hidden-fields{margin:12px 0}.hidden-fields summary{font-weight:500}.hidden-list{margin:8px 0 0;padding:0;list-style:none}
+        .hidden-list li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eef2f7}.hidden-copy{flex:1;min-width:0}
+        .hidden-copy strong{display:block;font-size:12px;color:#42536b}.hidden-copy small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;color:#5c6e86}
+        .config-title{display:flex;align-items:flex-start;gap:8px;margin-bottom:4px}.config-title h2{flex:1;min-width:0;overflow-wrap:anywhere}.config-title .rename-open{margin-top:-3px}
+        .macro-name-editor{display:flex;align-items:center;gap:4px;margin-bottom:8px}.macro-name-editor input{flex:1;width:0;min-width:0;margin:0;font-size:14px;padding:7px 9px;min-height:36px}.rename-save{color:#145fc0;background:#edf3fb}
+        .name-feedback{font-size:12px;color:#b42318;margin:6px 0 10px;overflow-wrap:anywhere}.name-feedback:empty{display:none}
+        .field-feedback{font-size:12px;color:#b42318;line-height:1.6;margin:10px 0}.field-feedback:empty{display:none}
+        input,select{caret-color:#1c2b40}::selection{background:#dce9fb;color:#1c2b40}
+        .panel{scrollbar-color:#a3afbf #fff}
+        input,select{display:block;width:100%;min-height:42px;padding:9px 11px;margin-top:6px;border:1px solid #c7d3e2;
           border-radius:9px;background:white;color:#1c2b40;font-size:14px}
         details{margin:15px 0;color:#5c6e86;font-size:12px}summary{cursor:pointer;font-weight:600}
         dl{margin:10px 0 0;padding:12px;background:#f7f9fc;border-radius:10px}
-        dt{font-size:11px;color:#8190a3;margin-top:10px}dt:first-child{margin-top:0}
+        dt{font-size:11px;color:#5c6e86;margin-top:10px}dt:first-child{margin-top:0}
         dd{margin:2px 0 0;font-size:12px;color:#42536b;overflow-wrap:anywhere}
-        .note{margin:15px 0;color:#758297;font-size:11px;line-height:1.6}
+        .note{margin:15px 0;color:#5c6e86;font-size:12px;line-height:1.6}
         .run{width:100%;padding:11px;border:0;border-radius:10px;background:#145fc0;color:#fff;font-weight:600;font-size:13px}
         .run:hover:enabled{background:#0f50a6}output{display:block;white-space:pre-wrap;overflow-wrap:anywhere;
           margin-top:12px;font-size:12px;color:#61728a}output:empty{display:none}
@@ -74,9 +101,10 @@
         <header><button class="quiet back" type="button" aria-label="스크립트 목록으로" hidden>‹</button>
           <div class="brand"><strong>Macro Studio</strong><span>자주 하는 일을 간편하게</span></div>
           <button class="quiet close" type="button" aria-label="도우미 닫기">×</button></header>
-        <main><div class="list"><p class="eyebrow">스크립트</p><div class="scripts"></div><p class="empty">스크립트를 불러오는 중…</p><p class="list-status" role="status"></p><button class="studio-open" data-studio-action="open" type="button">＋ 새 자동화 만들기</button><button class="library-open" data-studio-action="library" type="button">스크립트 보관함 ↗</button></div>
-          <div class="config" hidden><h2></h2><p class="description"></p>
-            <form><div class="fields"></div><details><summary>입력 내용 확인</summary><dl></dl></details>
+        <main><div class="list"><div class="scripts"></div><p class="empty">스크립트를 불러오는 중…</p><p class="list-status" role="status"></p><button class="studio-open" data-studio-action="open" type="button">＋ 새 자동화 만들기</button><button class="library-open" data-studio-action="library" type="button">스크립트 보관함</button></div>
+          <div class="config" hidden><div class="config-title"><h2></h2><button type="button" class="field-action rename-open" title="매크로 이름 수정" aria-label="매크로 이름 수정">${fieldIcon('edit')}</button></div>
+            <div class="macro-name-editor" hidden><input class="macro-name" aria-label="매크로 이름" maxlength="100" autocomplete="off"><button class="field-action rename-save" data-studio-action="rename-script" type="button" title="이름 저장" aria-label="이름 저장">${fieldIcon('save')}</button><button class="field-action rename-cancel" type="button" title="수정 취소" aria-label="수정 취소">${fieldIcon('cancel')}</button></div><p class="name-feedback" role="status" aria-live="polite"></p><p class="description"></p>
+            <form><p class="field-feedback" role="status" aria-live="polite"></p><div class="fields"></div><details class="hidden-fields" hidden><summary title="숨긴 값도 실행에 그대로 사용됩니다."></summary><ul class="hidden-list"></ul></details><details class="input-summary"><summary>입력 내용 확인</summary><dl></dl></details>
               <p class="note"></p><button class="run" type="submit">신청 준비</button></form>
             <output aria-live="polite"></output></div></main>
       </section><span class="sr announcement" role="status" aria-live="polite"></span>`;
@@ -157,12 +185,16 @@
     function choose(definition) {
       if (busy || !library.ready || library.siteEnabled === false || library.pending || unavailable(definition.id)) return;
       rememberValues();
+      if (selected?.id !== definition.id) { nameEditing = null; config.querySelector('.name-feedback').textContent = ''; }
       selected = definition;
+      configRefresh = false;
+      form.dataset.scriptId = definition.id;
       form.dataset.localScript = definition.local?.id || '';
       form.dataset.localRevision = definition.local?.revision || '';
       list.hidden = true;
       config.hidden = back.hidden = false;
       config.querySelector("h2").textContent = definition.name;
+      renderNameEditor();
       config.querySelector(".description").textContent = definition.description || "";
       config.querySelector(".note").textContent = definition.note || "";
       output.textContent = "";
@@ -172,19 +204,51 @@
       fields.replaceChildren();
       controls.clear();
       const values = savedValues.get(definition.id) || {};
-      for (const field of definition.fields || []) {
-        const label = document.createElement("label");
-        label.className = "field";
-        label.textContent = field.label;
-        const input = document.createElement("input");
-        input.name = field.name;
-        input.type = field.type || "text";
+      const hiddenList = config.querySelector('.hidden-list'); hiddenList.replaceChildren();
+      config.querySelector('.field-feedback').textContent = '';
+      let hiddenCount = 0;
+      for (const [index, field] of (definition.fields || []).slice(0, 60).entries()) {
+        const row = document.createElement('div'); row.className = 'field'; row.dataset.fieldName = field.name;
+        const heading = document.createElement('div'); heading.className = 'field-heading';
+        const label = document.createElement('label'); label.textContent = field.label; heading.append(label);
+        const input = document.createElement(field.type === 'select' ? 'select' : 'input');
+        const type = field.type || 'text'; input.name = field.name; input.dataset.fieldType = type;
+        input.id = 'macro-field-' + index; label.htmlFor = input.id;
+        if (type === 'select') {
+          const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '선택하세요'; input.append(placeholder);
+          for (const item of (field.options || []).slice(0, 100)) {
+            const option = document.createElement('option'); option.value = String(item.value); option.textContent = String(item.label ?? item.value); input.append(option);
+          }
+        } else input.type = type;
         input.required = !!field.required;
-        input.value = values[field.name] ?? (typeof field.value === "function" ? field.value() : field.value) ?? "";
-        label.append(input);
-        fields.append(label);
-        controls.set(field.name, input);
+        let pref = library.fieldPreferences?.[definition.id]?.[field.name] || {};
+        if (pref.type !== type || typeof pref.value !== 'string' || (type === 'select' && ![...input.options].some(option => option.value === pref.value))) pref = {};
+        const value = pref.value ?? values[field.name] ?? (typeof field.value === 'function' ? field.value() : field.value) ?? '';
+        if (type === 'select') {
+          const option = [...input.options].find(option => option.value === String(value)) || input.options[0]; option.selected = true;
+        } else input.value = value;
+        // Changed definitions must expose an invalid saved value for correction.
+        if (input.checkValidity?.() === false) pref = {};
+        row.dataset.locked = String(!!pref.locked); row.hidden = !!pref.hidden;
+        const eligible = configurableTypes.has(type) && /^[a-zA-Z][a-zA-Z0-9_.-]{0,79}$/.test(field.name) && !['constructor','prototype','__proto__'].includes(field.name);
+        if (eligible) {
+          const actions = document.createElement('div'); actions.className = 'field-actions';
+          actions.append(fieldButton(definition, field, pref.locked ? 'locked' : 'unlocked', 'locked', !pref.locked, input),
+            fieldButton(definition, field, 'hide', 'hidden', true, input));
+          heading.append(actions);
+        }
+        row.append(heading, input); fields.append(row); controls.set(field.name, input);
+        if (pref.hidden && eligible) {
+          hiddenCount++;
+          const item = document.createElement('li'), copy = document.createElement('div'), name = document.createElement('strong'), preview = document.createElement('small');
+          copy.className = 'hidden-copy'; name.textContent = field.label;
+          preview.textContent = type === 'select' ? [...input.options].find(option => option.value === input.value)?.textContent || input.value : input.value || '값 없음';
+          copy.append(name, preview); item.append(copy, fieldButton(definition, field, 'show', 'hidden', false, input)); hiddenList.append(item);
+        }
       }
+      config.querySelector('.hidden-fields').hidden = !hiddenCount;
+      config.querySelector('.hidden-fields > summary').textContent = '숨긴 항목 ' + hiddenCount + '개';
+      updateFieldControls();
       const summary = config.querySelector("dl");
       summary.replaceChildren();
       for (const [label, text] of definition.summary || []) {
@@ -193,8 +257,58 @@
         dd.textContent = text;
         summary.append(dt, dd);
       }
-      config.querySelector("details").open = false;
+      config.querySelector(".input-summary").open = false;
       alignPanel();
+    }
+    function renderNameEditor() {
+      const editing = !!selected && nameEditing === selected.id;
+      config.querySelector('.config-title').hidden = editing;
+      config.querySelector('.macro-name-editor').hidden = !editing;
+      config.querySelector('.rename-open').hidden = !selected?.local?.id;
+      for (const button of config.querySelectorAll('.rename-open,.rename-save,.rename-cancel')) button.disabled = busy || !library.ready || !!library.pending;
+      config.querySelector('.macro-name').disabled = busy || !!library.pending;
+    }
+    function cancelNameEdit() {
+      if (busy || library.pending) return;
+      nameEditing = null; config.querySelector('.name-feedback').textContent = ''; renderNameEditor(); config.querySelector('.rename-open').focus();
+    }
+    config.querySelector('.rename-open').addEventListener('click', () => {
+      if (!selected?.local?.id || busy || library.pending) return;
+      nameEditing = selected.id; config.querySelector('.name-feedback').textContent = '';
+      const input = config.querySelector('.macro-name'); input.value = selected.name; renderNameEditor(); input.focus(); input.select?.();
+    });
+    config.querySelector('.rename-cancel').addEventListener('click', cancelNameEdit);
+    config.querySelector('.macro-name').addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !event.isComposing) {event.preventDefault(); cancelNameEdit();}
+    });
+    function fieldButton(definition, field, icon, action, enabled, input) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'field-action';
+      const label = action === 'locked' ? enabled ? '현재 값으로 잠금' : '잠금 해제' : enabled ? '값을 유지하고 숨기기' : '다시 표시';
+      button.innerHTML = fieldIcon(icon); button.title = label; button.setAttribute('aria-label', field.label + ' · ' + label);
+      if (action === 'locked') button.setAttribute('aria-pressed', String(!enabled));
+      Object.assign(button.dataset, {studioAction:action === 'locked' ? 'field-lock' : 'field-hide',scriptId:definition.id,fieldName:field.name,enabled:String(enabled)});
+      button.addEventListener('click', () => {
+        if (busy || !library.ready || library.siteEnabled === false) return;
+        if (enabled) {
+          const wasDisabled = input.disabled; input.disabled = false;
+          const valid = input.checkValidity?.() !== false;
+          if (!valid) input.reportValidity?.(); input.disabled = wasDisabled;
+          if (!valid) { config.querySelector('.field-feedback').textContent = '값을 올바르게 입력한 뒤 잠그거나 숨기세요.'; return; }
+        }
+        // The isolated bridge persists trusted clicks and publishes its result.
+        if (library.pending) return;
+        rememberValues();
+        const prefs = {...library.fieldPreferences}, fields = {...prefs[definition.id]};
+        const before = fields[field.name]?.type === (field.type || 'text') ? fields[field.name] : {locked:false,hidden:false};
+        const next = {...before,type:field.type || 'text',[action]:enabled,value:input.value};
+        if (next.locked || next.hidden) fields[field.name] = next; else delete fields[field.name];
+        prefs[definition.id] = fields; library.fieldPreferences = prefs; choose(definition);
+      });
+      return button;
+    }
+    function updateFieldControls() {
+      for (const input of controls.values()) input.disabled = busy || input.closest('.field')?.dataset.locked === 'true';
+      for (const button of root.querySelectorAll('.field-action')) button.disabled = busy || !library.ready || library.siteEnabled === false || !!library.pending;
     }
     function unavailable(id) {
       return library.archived.includes(id) || library.deleted.includes(id) || (library.available && !library.available.includes(id));
@@ -209,6 +323,13 @@
       host.style.display = visible ? 'block' : 'none';
     }
     function renderScripts() {
+      if (selected && !busy && library.ready && !library.pending && !unavailable(selected.id) &&
+          (configRefresh || definitions.get(selected.id) !== selected)) {
+        const scroll = panel.scrollTop, message = output.textContent, state = output.dataset.state;
+        choose(definitions.get(selected.id));
+        panel.scrollTop = scroll; output.textContent = message; output.dataset.state = state;
+      }
+      renderNameEditor();
       host.setAttribute('aria-busy', String(busy));
       const scripts = root.querySelector('.scripts');
       scripts.replaceChildren();
@@ -235,21 +356,31 @@
         library.error ? '스크립트를 불러오지 못했습니다. 확장과 페이지를 새로고침하세요.' : '스크립트를 불러오는 중…';
       runButton.disabled = busy || !library.ready || library.siteEnabled === false || !!library.pending || !!(selected && unavailable(selected.id));
       root.querySelector('.studio-open').disabled = busy || !library.ready || library.siteEnabled === false;
+      updateFieldControls();
       updateVisibility();
     }
     function applyLibraryState(state) {
       if (!state || !Array.isArray(state.archived) || !Array.isArray(state.deleted)) return;
-      library = { ready: state.ready === true, archived: state.archived.filter(id => typeof id === 'string'),
+      const nextPreferences = state.fieldPreferences && typeof state.fieldPreferences === 'object' ? state.fieldPreferences : {};
+      const preferencesChanged = JSON.stringify(library.fieldPreferences) !== JSON.stringify(nextPreferences);
+      configRefresh ||= preferencesChanged;
+      if (state.renamed && typeof state.renamed.id === 'string' && typeof state.renamed.name === 'string' && definitions.has(state.renamed.id)) {
+        const definition = definitions.get(state.renamed.id); definitions.set(state.renamed.id,{...definition,name:state.renamed.name});
+        if (nameEditing === state.renamed.id) nameEditing = null;
+        config.querySelector('.name-feedback').textContent = ''; configRefresh = true;
+      }
+      if (typeof state.renameError === 'string') config.querySelector('.name-feedback').textContent = state.renameError;
+      library = { fieldPreferences:nextPreferences, ready: state.ready === true, archived: state.archived.filter(id => typeof id === 'string'),
         deleted: state.deleted.filter(id => typeof id === 'string'), available: Array.isArray(state.available) ? state.available.filter(id => typeof id === 'string') : null,
         siteEnabled: typeof state.siteEnabled === 'boolean' ? state.siteEnabled : null,
         pending: state.pending || null, error: state.error || '' };
       if (selected && unavailable(selected.id) && !busy) showList();
-      else if (selected && !busy && library.ready && definitions.get(selected.id) !== selected) choose(definitions.get(selected.id));
       for (const id of library.deleted) savedValues.delete(id);
       renderScripts();
       const message = root.querySelector('.list-status'); message.textContent = state.error || state.message || '';
       message.dataset.error = String(!!state.error);
       if (state.message) announcement.textContent = state.message;
+      config.querySelector('.field-feedback').textContent = state.fieldError || '';
     }
     // This DOM channel only updates presentation; privileged writes require a trusted isolated-world click.
     host.addEventListener(LIBRARY_EVENT, event => {
@@ -308,7 +439,7 @@
       busy = true;
       renderScripts();
       back.disabled = runButton.disabled = true;
-      for (const input of controls.values()) input.disabled = true;
+      updateFieldControls();
       runButton.textContent = "진행 중…";
       report("준비 중…");
       try {
@@ -321,7 +452,7 @@
       } finally {
         busy = false;
         back.disabled = runButton.disabled = false;
-        for (const input of controls.values()) input.disabled = false;
+        updateFieldControls();
         runButton.textContent = definition.actionLabel || "실행";
         if (selected && unavailable(selected.id)) showList();
         for (const definition of pendingDefinitions.values()) app.replace(definition);

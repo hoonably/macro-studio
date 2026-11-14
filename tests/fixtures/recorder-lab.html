@@ -1,0 +1,39 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><title>Recorder verification lab</title>
+<style>body{font:15px/1.5 system-ui;max-width:1000px;margin:24px auto;color:#243344}form{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:20px;border:1px solid #ccd5dc}label{display:block}input,select,textarea,button,[tabindex],[contenteditable]{font:inherit;padding:8px;margin:4px 0}button,[tabindex]{cursor:pointer}section{border-bottom:1px solid #ddd;padding-bottom:12px}[role=checkbox],[role=radio]{display:inline-block;padding:10px;border:1px solid #789}[aria-checked=true]{background:#abd9bf}pre{font-size:12px;white-space:pre-wrap}#list,#calendar{background:#f1f4f7;padding:12px}svg{width:18px;height:18px}</style>
+<header id="macro-studio-launcher"><h1>Recorder verification lab</h1><p>합성 데이터만 사용하는 로컬 검증 화면</p><button id="clear">기록 초기화</button><button id="stop">기록 중지</button><span id="status">준비 중</span></header>
+<form onsubmit="event.preventDefault()">
+<section><h2>달력과 기본 분</h2><label>날짜 <input ct="I" data-cust-sid-main.visitDate id="date" aria-label="날짜" placeholder="YYYY.MM.DD" value="2026.11.11"></label><span id="calendar-open" tabindex="0">달력 열기</span><div id="calendar" hidden><span id="calendar-day" tabindex="0">12일 선택</span></div><label>시작 분 <select name="minute" aria-label="시작 분"><option value="00">00분</option><option value="30">30분</option></select></label></section>
+<section><h2>커스텀 선택</h2><span id="check" ct="C" data-cust-sid-main.confirm role="checkbox" aria-label="사용자 확인" aria-checked="false" tabindex="0">확인 상태</span><span id="radio" ct="R" data-cust-sid-main.method role="radio" aria-label="선택 방식" aria-checked="false" tabindex="0">방식 선택</span><label>처리 방식 <input id="combo" ct="CB" data-cust-sid-main.delivery role="combobox" readonly aria-label="처리 방식" aria-controls="list" value="기본"></label><div id="list" hidden><div role="option" data-itemkey="later" tabindex="0">나중에 처리</div></div></section>
+<section><h2>일반 요소와 편집</h2><div id="custom" tabindex="0"><span id="custom-label">일반 메뉴</span></div><label>이름 <input name="visitor" aria-label="이름"></label><label><input type="checkbox" name="nativeConfirm">기본 체크박스</label><div contenteditable="true" aria-label="메모">메모</div><label>동적 입력 <input id="dynamic" name="dynamic" aria-label="동적 입력" value="이전"></label><button type="button" id="rerender">입력란 재생성</button></section>
+<section><h2>Shadow DOM과 제외 항목</h2><test-panel id="shadow-host"></test-panel><label>자동 계산 결과 <input name="calculated" readonly value="0"></label><label>비밀번호 <input type="password" name="password" value="FAKE_PASSWORD_DO_NOT_RECORD"></label><label>API token <input name="api_token" value="FAKE_TOKEN_DO_NOT_RECORD"></label><output id="effect">대기</output></section>
+</form><button type="button" id="open-extra">추가 양식 열기</button><div id="extra"></div><h2>수집 결과</h2><pre id="results"></pre>
+<script type="module">
+import {normalizeEvent,normalizeFieldContext,agentPrompt} from '/extension/recorder/model.js';
+const listeners=[],steps=[],fieldContexts=[];let recording='lab-1';
+const render=()=>{document.getElementById('results').textContent=JSON.stringify({steps,fieldContexts},null,2);document.getElementById('status').textContent=`${steps.length}개 동작 · ${fieldContexts.reduce((s,c)=>s+c.fields.length,0)}개 입력란`};
+window.chrome={runtime:{onMessage:{addListener:fn=>listeners.push(fn)},sendMessage:async message=>{
+ if(message.type==='capture:status')return{ok:true,value:{recordingId:recording}};
+ if(message.type==='capture:event'){const step=normalizeEvent(message.event);if(step)steps.push(step);}
+ if(message.type==='capture:context'){const context=normalizeFieldContext(message.context);if(context)fieldContexts.push(context);}
+ render();return{ok:true};
+}}};
+await import('/extension/recorder/capture.js');
+document.getElementById('clear').onclick=()=>{steps.length=0;fieldContexts.length=0;recording='lab-'+Date.now();listeners.forEach(fn=>fn({type:'capture:state',recordingId:recording},{},()=>{}));render()};
+document.getElementById('stop').onclick=async()=>{await Promise.all(listeners.map(fn=>new Promise(resolve=>fn({type:'capture:flush'},{},resolve))));recording=null;listeners.forEach(fn=>fn({type:'capture:state',recordingId:null},{},()=>{}));render()};
+document.getElementById('calendar-open').onclick=()=>document.getElementById('calendar').hidden=false;
+document.getElementById('calendar-day').onclick=()=>{document.getElementById('date').value='2026.11.12';document.getElementById('calendar').hidden=true;};
+const toggle=el=>el.setAttribute('aria-checked',String(el.getAttribute('aria-checked')!=='true'));
+document.getElementById('check').onpointerdown=event=>toggle(event.currentTarget);
+document.getElementById('radio').onclick=event=>toggle(event.currentTarget);
+document.getElementById('radio').onkeydown=event=>{if(event.key===' '){event.preventDefault();toggle(event.currentTarget)}};
+document.getElementById('combo').onclick=()=>document.getElementById('list').hidden=false;
+document.querySelector('[data-itemkey]').onclick=()=>{document.getElementById('list').hidden=true;setTimeout(()=>{const previous=document.getElementById('combo'),next=previous.cloneNode(true);next.value='나중에 처리';next.id='combo';previous.replaceWith(next);},120)};
+document.getElementById('rerender').onclick=()=>{const field=document.getElementById('dynamic'),next=field.cloneNode(true);next.value='재생성됨';field.replaceWith(next)};
+document.getElementById('custom').onclick=()=>{document.getElementById('effect').textContent='일반 메뉴 클릭됨';document.querySelector('[name=calculated]').value='99999'};
+document.getElementById('custom').oncontextmenu=event=>{event.preventDefault();document.getElementById('effect').textContent='오른쪽 클릭됨'};
+const shadow=document.getElementById('shadow-host').attachShadow({mode:'open'});
+shadow.innerHTML='<style>button,input{font:inherit;padding:8px}svg{width:18px;height:18px}</style><button id="shadow-action" aria-label="그림 아이콘"><svg viewBox="0 0 20 20"><path d="M2 2h16v16H2z" fill="teal"></path></svg>그림 아이콘</button><input name="shadowNote" aria-label="내부 메모">';
+shadow.querySelector('button').onclick=()=>document.getElementById('effect').textContent='Shadow 아이콘 클릭됨';
+document.getElementById('open-extra').onclick=()=>setTimeout(()=>{document.getElementById('extra').innerHTML='<div role="dialog" aria-label="추가 양식"><label>추가 날짜<input name="newDate" type="date" aria-label="추가 날짜" value="2026-12-01"></label></div>'},120);
+render();
+</script></html>

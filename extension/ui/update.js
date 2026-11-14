@@ -83,7 +83,7 @@ async function checkBuild(manual = false) {
 }
 entry.addEventListener('click', () => {
   if (document.querySelector('#site-toggle')) {
-    chrome.tabs.create({ url: chrome.runtime.getURL('ui/scripts.html#updates') }).then(() => window.close()).catch(() => {
+    window.MacroStudioPanel.open('updates').then(() => window.close()).catch(() => {
       notice.textContent = '업데이트 화면을 열지 못했습니다. 잠시 후 다시 시도하세요.'; notice.hidden = false;
     });
   } else dialog.showModal();
@@ -109,3 +109,7 @@ window.addEventListener('focus', () => checkBuild());
 await readPreferences();
 await checkBuild();
 if (window.location.hash === '#updates') dialog.showModal();
+
+window.addEventListener('message', event => {
+  if (event.source === window.parent && event.origin === chrome.runtime.getURL('').replace(/\/$/,'') && event.data?.type === 'macro-studio:open-updates') dialog.showModal();
+});

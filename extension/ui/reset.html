@@ -1,7 +1,7 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>처음 상태로 초기화 · Macro Studio</title><link rel="stylesheet" href="studio.css"></head>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>처음 상태로 초기화 · Macro Studio</title><link rel="stylesheet" href="studio.css"><script src="panel-navigation.js" defer></script></head>
 <body>
-  <header class="brand studio-brand"><img src="../assets/icon-48.png" width="36" height="36" alt=""><div><strong>Macro Studio</strong><p>처음 상태로 초기화</p></div></header>
+  <header class="brand studio-brand"><a class="brand-home" href="studio.html"><img src="../assets/icon-48.png" width="32" height="32" alt=""><strong>Macro Studio</strong></a><nav aria-label="주요 메뉴"><a href="studio.html">만들기</a><a href="library.html">내 매크로</a></nav></header>
   <main><section>
     <h2>기록과 개인 설정을 지울까요?</h2>
     <p id="reset-summary" role="status" aria-live="polite">삭제할 항목을 확인하는 중…</p>
@@ -10,7 +10,7 @@
     <p class="hint">Chrome의 ‘사용자 스크립트 허용’ 설정과 이전 권한 승인 이력은 초기화할 수 없습니다. 설치·권한 안내까지 완전히 처음부터 시험하려면 확장을 제거하고 다시 등록하세요.</p>
     <p class="hint">삭제 후 열려 있는 웹페이지와 작업실을 새로고침하세요. 이미 페이지에 로드된 코드와 입력 화면은 새로고침할 때 사라집니다.</p>
     <label><input id="reset-ack" type="checkbox" disabled> 삭제 범위를 확인했습니다.</label>
-    <div class="actions"><button id="confirm-reset" disabled>기록과 개인 설정 삭제</button><a href="scripts.html">돌아가기</a></div>
+    <div class="actions"><button id="confirm-reset" disabled>기록과 개인 설정 삭제</button><a href="studio.html">돌아가기</a></div>
     <p id="reset-result" role="status" aria-live="polite"></p>
   </section></main><script type="module" src="reset.js"></script>
 </body></html>

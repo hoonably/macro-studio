@@ -1,0 +1,6 @@
+html, body { margin: 0; height: 100%; background: #f6f7f9; }
+#views, #permission-view { width: 100%; height: 100%; }
+iframe { display: block; border: 0; width: 100%; height: 100%; }
+[hidden] { display: none !important; }
+#permission-view { position: fixed; inset: 0; z-index: 1; background: #fff; }
+#loading { padding: 20px; font: 14px system-ui; color: #344b65; }

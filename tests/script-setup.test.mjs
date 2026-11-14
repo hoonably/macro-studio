@@ -9,7 +9,8 @@ test('confirmed paths support spaces and Windows separators and reject relative 
   for (const value of ['~/Macros', 'Macros', '/Users/example/../Macros', '/Users/example/Macros\nrun-this', '/Users/example/Other']) {
     assert.throws(() => normalizeFolderPath(value, 'Macros'));
   }
-  assert.equal(folderReady({ connected: true, readable: true, folderName: 'Macros', folderPath: '/Users/example/Macros' }), true);
+  assert.equal(folderReady({ connected: true, readable: true, writable: true, folderName: 'Macros', folderPath: '/Users/example/Macros' }), true);
+  assert.equal(folderReady({connected:true,readable:true,writable:false,folderName:'Macros',folderPath:'/Users/example/Macros'}),false);
   assert.equal(scriptsPath('/Users/example/Repository', ['local', 'scripts']), '/Users/example/Repository/local/scripts');
   assert.throws(() => scriptsPath('/Users/example/Repository', ['..']));
 });

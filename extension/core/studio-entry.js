@@ -21,7 +21,7 @@
       const form = event.target;
       if (!event.isTrusted || !state.ready || state.siteEnabled === false || !form?.dataset?.localScript) return;
       const token = activation = { id: form.dataset.localScript, revision: form.dataset.localRevision,
-        values: Object.fromEntries([...form.querySelectorAll('input')].map(input => [input.name, input.value])) };
+        values: Object.fromEntries([...form.querySelectorAll('input,select')].map(input => [input.name, input.value])) };
       // Chrome can flush microtasks between the isolated capture and MAIN submit listeners.
       // Keep this one-use, exact-form activation until the current event task ends.
       setTimeout(() => { if (activation === token) activation = null; }, 0);
@@ -53,11 +53,13 @@
     if (!response?.ok) throw new Error(response?.error || '확장 프로그램 응답이 없습니다.');
     return response.value;
   };
-  async function refresh() {
+  async function refresh(reconnect = true) {
     const current = ++revision;
-    state = { ...state, ready: false }; publish();
+    // Keep the last confirmed snapshot during a refresh. A temporary loading
+    // state must not hide the host or close the user's open execution form.
+    if (!state.ready) publish();
     try {
-      const connection = await request('local:connect');
+      const connection = reconnect ? await request('local:connect') : null;
       const value = await request('scripts:state');
       if (revision !== current) return;
       state = value; publish({ error: connection?.error || '' });
@@ -65,13 +67,49 @@
       if (revision === current) publish({ error: error.message });
     }
   }
+  async function rename(currentHost) {
+    if (pending || !state.ready || state.siteEnabled === false) return;
+    const form = currentHost.shadowRoot.querySelector('form');
+    const input = currentHost.shadowRoot.querySelector('.macro-name');
+    const editor = currentHost.shadowRoot.querySelector('.macro-name-editor');
+    if (!input || editor?.hidden || !form?.dataset.localScript) return;
+    const id = form.dataset.localScript, name = input.value.trim();
+    if (!name || name.length > 100 || /[\u0000-\u001f\u007f]/.test(name)) { publish({renameError:'이름을 1–100자로 입력하세요.'}); return; }
+    let renamed = null, error = '';
+    pending = id; publish({renameError:''});
+    try {
+      const {renamed:updated,...next} = await request('scripts:rename', {id,name});
+      ++revision; state = next; renamed = updated;
+    } catch (failure) { error = failure.message; }
+    finally { pending = null; publish({renameError:error,...(renamed ? {renamed} : {})}); }
+  }
+  document.addEventListener('keydown', event => {
+    if (!event.isTrusted || event.isComposing || event.key !== 'Enter') return;
+    const currentHost = document.getElementById(HOST_ID), path = event.composedPath();
+    if (!currentHost || !path.includes(currentHost) || !path.some(node => node?.classList?.contains('macro-name') && currentHost.shadowRoot.contains(node))) return;
+    event.preventDefault(); rename(currentHost);
+  }, true);
   document.addEventListener('click', async event => {
     const path = event.composedPath(), currentHost = document.getElementById(HOST_ID);
     if (!event.isTrusted || !currentHost || !path.includes(currentHost)) return;
     const action = path.find(node => node?.dataset?.studioAction && currentHost.shadowRoot?.contains(node));
     if (!action || action.disabled || !state.ready || state.siteEnabled === false) return;
     try {
-      if (action.dataset.studioAction === 'open') {
+      if (action.dataset.studioAction === 'rename-script') await rename(currentHost);
+      else if (action.dataset.studioAction.startsWith('field-') && !pending) {
+        const form = currentHost.shadowRoot.querySelector('form');
+        const input = [...form.querySelectorAll('input,select')].find(input => input.name === action.dataset.fieldName);
+        if (!input || form.dataset.scriptId !== action.dataset.scriptId) return;
+        const enabled = action.dataset.enabled === 'true';
+        const wasDisabled = input.disabled; input.disabled = false;
+        const valid = !enabled || input.checkValidity(); input.disabled = wasDisabled;
+        if (!valid) return;
+        const payload = {id:action.dataset.scriptId,name:input.name,fieldType:input.dataset.fieldType,
+          action:action.dataset.studioAction === 'field-lock' ? 'locked' : 'hidden',enabled,value:input.value};
+        pending = payload.id; publish();
+        try { const value = await request('scripts:field', payload); ++revision; state = value; }
+        finally { pending = null; publish(); }
+      } else if (action.dataset.studioAction === 'open') {
         if (location.protocol !== 'chrome-extension:') await request('studio:open');
       } else if (action.dataset.studioAction === 'library') await request('library:open');
       else if (action.dataset.studioAction === 'archive-script' && !pending && state.ready) {
@@ -87,14 +125,17 @@
           publish({ pending: null, message: '보관함으로 옮겼습니다. 스크립트 보관함에서 복원하거나 삭제할 수 있습니다.' });
         } finally { pending = null; }
       }
-    } catch (error) { publish({ pending: null, error: error.message }); }
+    } catch (error) { publish({ pending: null, error: error.message, fieldError: action.dataset.studioAction.startsWith('field-') ? error.message : '' }); }
   }, true);
   const observer = new MutationObserver(() => {
     if (document.getElementById(HOST_ID) !== host) publish();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && (changes[KEY] || changes.macroStudioSites || changes.macroStudioLocalScripts?.newValue?.revision !== changes.macroStudioLocalScripts?.oldValue?.revision)) refresh();
+    if (area !== 'local') return;
+    const codeChanged = changes.macroStudioLocalScripts?.newValue?.revision !== changes.macroStudioLocalScripts?.oldValue?.revision;
+    if (changes[KEY] || changes.macroStudioSites || codeChanged) refresh();
+    else if (changes.macroStudioFieldPreferences) refresh(false);
   });
   chrome.runtime.onMessage.addListener(message => { if (message.type === 'local:changed') refresh(); });
   refresh();

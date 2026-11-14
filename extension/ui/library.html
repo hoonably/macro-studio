@@ -1,13 +1,14 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>내 매크로 · Macro Studio</title><link rel="stylesheet" href="studio.css"><link rel="stylesheet" href="library.css"></head><body>
-<header class="brand studio-brand"><a class="brand-home" href="studio.html"><img src="../assets/icon-48.png" width="32" height="32" alt=""><strong>Macro Studio</strong></a><nav aria-label="주요 메뉴"><a href="studio.html">만들기</a><a href="library.html" aria-current="page">내 매크로</a><a href="scripts.html">설정</a></nav></header>
-<main class="library-main">
-  <div class="section-heading library-heading"><div><h1>내 매크로</h1><p class="hint">실행은 대상 사이트의 파란 버튼에서 시작하세요.</p></div><a class="button-link" href="studio.html">+ 새 매크로</a></div>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>내 매크로 · Macro Studio</title><link rel="stylesheet" href="studio.css"><link rel="stylesheet" href="library.css"><script src="panel-navigation.js" defer></script></head><body>
+<header class="brand studio-brand"><a class="brand-home" href="studio.html"><img src="../assets/icon-48.png" width="32" height="32" alt=""><strong>Macro Studio</strong></a><nav aria-label="주요 메뉴"><a href="studio.html">만들기</a><a href="library.html" aria-current="page">내 매크로</a></nav></header>
+<main class="library-main" hidden>
+  <div class="workspace-location" aria-label="현재 저장 경로"><svg class="location-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg><code id="workspace-path">경로 확인 중…</code><button id="workspace-settings" class="icon-button" aria-label="저장 경로 수정" title="저장 경로 수정"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 4 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L5 15 4 20Z"/></svg></button></div>
+  <div class="section-heading library-heading"><div><h1>내 매크로</h1><p class="hint">실행은 대상 사이트의 파란 버튼에서 시작하세요.</p></div><a class="button-link" href="studio.html"><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>새 매크로</a></div>
   <section aria-label="매크로 목록">
     <label class="search-label" for="script-search">이름 또는 사이트 검색<input type="search" id="script-search" placeholder="매크로 찾기" autocomplete="off"></label>
     <div class="library-tabs" role="tablist" aria-label="매크로 상태"><button id="active-tab" role="tab" aria-selected="true" aria-controls="active-panel">사용 중 <span id="active-count">0개</span></button><button id="archived-tab" role="tab" aria-selected="false" aria-controls="archived-panel" tabindex="-1">보관 중 <span id="archived-count">0개</span></button></div>
     <div class="library-feedback"><p id="library-status" role="status" aria-live="polite">불러오는 중…</p><button id="undo-archive" class="text-button" hidden>되돌리기</button></div>
-    <div id="active-panel" role="tabpanel" aria-labelledby="active-tab"><ul id="active-scripts" class="script-cards"></ul><div id="active-empty" class="empty-state" hidden><p>아직 사용 중인 매크로가 없습니다.</p><a href="studio.html">첫 매크로 만들기 →</a></div></div>
+    <div id="active-panel" role="tabpanel" aria-labelledby="active-tab"><ul id="active-scripts" class="script-cards"></ul><div id="active-empty" class="empty-state" hidden><p>아직 사용 중인 매크로가 없습니다.</p><a href="studio.html">첫 매크로 만들기</a></div></div>
     <div id="archived-panel" role="tabpanel" aria-labelledby="archived-tab" hidden><ul id="archived-scripts" class="script-cards"></ul><p id="archived-empty" class="empty-state" hidden>보관한 매크로가 없습니다.</p></div>
     <p id="search-empty" class="empty-state" hidden>검색 결과가 없습니다.</p>
     <div class="library-tools"><a href="scripts.html">폴더·권한 설정</a><button id="library-sync" class="text-button">파일 반영 확인</button></div>
@@ -16,5 +17,5 @@
   <footer><a href="privacy.html">데이터와 권한</a></footer>
 </main>
 <dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-description"><h2 id="delete-title">이 매크로를 목록에서 삭제할까요?</h2><p id="delete-name"></p><p id="delete-description">이 확장에서는 복원할 수 없습니다. 연결한 폴더의 원본 파일은 유지됩니다.</p><div class="actions"><button id="cancel-delete" class="secondary" autofocus>취소</button><button id="confirm-delete" class="danger">삭제</button></div></dialog>
-<script type="module" src="library.js"></script><script type="module" src="update.js"></script>
+<script type="module" src="workspace-location.js"></script><script type="module" src="library.js"></script><script type="module" src="update.js"></script>
 </body></html>

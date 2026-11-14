@@ -1,12 +1,14 @@
-import { MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent } from './recorder/model.js';
+import { MAX_STEPS, DEFAULT_STOP_BEFORE, normalizeEvent, normalizeFieldContext } from './recorder/model.js';
 import { LIBRARY_KEY, libraryState, matchesSite, changeLibrary } from './core/script-library.js';
 import { inspectFrames, sitePattern } from './recorder/frames.js';
+import { createFramePermissionMonitor } from './recorder/frame-permissions.js';
 import { createScriptRuntime } from './scripts/runtime.js';
 import { SITES_KEY, siteOrigin, siteSettings, siteEnabled } from './core/site-settings.js';
 import { optionalResetPermissions } from './core/reset.js';
 import { createBuildUpdater } from './core/build-updates.js';
 import { STORE_BUILD } from './core/distribution.js';
 import { UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, availableVersion } from './core/update-notices.js';
+import { FIELD_PREFERENCES_KEY, fieldPreferences, changeFieldPreference } from './core/field-preferences.js';
 
 const KEY = 'macroStudioRecording';
 const CAPTURE_FILES = ['core/namespace.js', 'ui/launcher.js', 'core/studio-entry.js', 'recorder/capture.js'];
@@ -19,14 +21,35 @@ const serial = action => {
 };
 const read = async () => (await chrome.storage.session.get(KEY))[KEY] || null;
 const write = state => chrome.storage.session.set({ [KEY]: state });
-const allowed = (state, sender) => state?.status === 'recording' && sender.tab?.id === state.tabId &&
+const allowed = (state, sender) => state?.status === 'recording' && !state.pendingFrameOrigins?.length && sender.tab?.id === state.tabId &&
   state.origins.some(pattern => { try { return new URL(sender.url).origin + '/*' === pattern; } catch { return false; } });
 const controlPage = sender => sender.id === chrome.runtime.id && sender.url?.startsWith(chrome.runtime.getURL('ui/'));
+const PANEL_PAGES = new Set(['studio','library','scripts','privacy','reset','updates']);
+async function rememberPanel(windowId, page) {
+  if (!Number.isInteger(windowId) || !PANEL_PAGES.has(page)) throw new Error('열 화면을 확인하세요.');
+  const { macroStudioPanelRoutes = {} } = await chrome.storage.local.get('macroStudioPanelRoutes');
+  await chrome.storage.local.set({ macroStudioPanelRoutes:{ ...macroStudioPanelRoutes,[windowId]:page } });
+}
+async function openPanel(message, sender, page) {
+  if (sender.id !== chrome.runtime.id || (!controlPage(sender) && (!sender.tab || sender.frameId !== 0))) throw new Error('현재 페이지에서 열어주세요.');
+  if (!PANEL_PAGES.has(page)) throw new Error('지원하지 않는 화면입니다.');
+  const tabId = sender.tab?.id ?? message.tabId;
+  let windowId = sender.tab?.windowId ?? message.windowId;
+  if (!Number.isInteger(windowId) && !Number.isInteger(tabId)) throw new Error('현재 Chrome 창을 확인하세요.');
+  // Open immediately in the original click gesture, before any queued storage work.
+  const opening = chrome.sidePanel.open(Number.isInteger(tabId) ? { tabId } : { windowId });
+  if (!Number.isInteger(windowId)) windowId = (await chrome.tabs.get(tabId)).windowId;
+  await serial(() => rememberPanel(windowId, page));
+  await opening;
+  await serial(() => framePermissions.show());
+  return { ok:true };
+}
 const readSites = async () => siteSettings((await chrome.storage.local.get(SITES_KEY))[SITES_KEY]);
 async function requireSiteOn(origin) {
   if (!siteEnabled(await readSites(), origin)) throw new Error('도구모음의 Macro Studio에서 이 사이트에 적용을 ON으로 켜주세요.');
 }
 const localScripts = createScriptRuntime(chrome, { changed: refreshOpenTabs });
+const framePermissions = createFramePermissionMonitor(chrome, { read, write, connect: connectCapture });
 const sessionReady = localScripts.restoreSession();
 let applyingUpdate = false;
 const buildUpdates = createBuildUpdater(chrome, {
@@ -68,12 +91,6 @@ async function applyBuildUpdate(confirm = async () => true) {
       const prepared = await chrome.runtime.sendMessage({ type: 'update:prepare' }).catch(() => null);
       if (prepared?.saved === false) return false;
       if (!await confirm()) return false;
-      const pages = (await chrome.tabs.query({})).flatMap(tab => {
-        if (!tab.url?.startsWith(chrome.runtime.getURL('ui/'))) return [];
-        const path = new URL(tab.url).pathname;
-        return ['/ui/studio.html', '/ui/scripts.html', '/ui/library.html'].includes(path) ? [{ id: tab.id, path }] : [];
-      });
-      await chrome.storage.local.set({ macroStudioResumeUpdatePages: pages });
       await localScripts.preserveSession();
       reload = true;
       // Reply to the check request before Chrome replaces this worker.
@@ -123,10 +140,11 @@ async function activate(message) {
     for (const group of info.permitted) if (!state.origins.includes(group.pattern)) state.origins.push(group.pattern);
     await write(state);
   }
-  const result = await connectCapture(info, continuing ? state.id : null);
+  const result = await connectCapture(info, continuing && !state.pendingFrameOrigins?.length ? state.id : null);
   if (continuing) {
     if (result.failed) state.note = CAPTURE_NOTE; else delete state.note;
     await write(state);
+    await framePermissions.review(info.tabId);
   }
   return result;
 }
@@ -142,16 +160,32 @@ async function scripts(message, sender) {
   const available = ui ? all : sender.tab ? all.filter(script =>
     script.matches.some(pattern => matchesSite(pattern, sender.url))) : [];
   let state = libraryState((await chrome.storage.local.get(LIBRARY_KEY))[LIBRARY_KEY]);
+  const preferences = fieldPreferences((await chrome.storage.local.get(FIELD_PREFERENCES_KEY))[FIELD_PREFERENCES_KEY]);
+  if (message.type === 'scripts:rename') {
+    if (!available.some(script => script.id === message.id && script.local) || state.deleted.includes(message.id)) throw new Error('연결한 폴더의 매크로만 수정할 수 있습니다.');
+    await localScripts.rename(message.id, message.name, await catalog());
+    const renamed = (await localScripts.catalog(await catalog())).find(script => script.id === message.id);
+    return {...await scripts({type:'scripts:state'},sender),renamed:{id:message.id,name:renamed.name}};
+  }
+  if (message.type === 'scripts:field') {
+    if (!available.some(script => script.id === message.id) || state.deleted.includes(message.id)) throw new Error('이 페이지의 스크립트가 아닙니다.');
+    const next = changeFieldPreference(preferences, {...message,type:message.fieldType});
+    await chrome.storage.local.set({[FIELD_PREFERENCES_KEY]:next});
+    return scripts({type:'scripts:state'}, sender);
+  }
   if (message.type !== 'scripts:state') {
     if (!available.some(script => script.id === message.id)) throw new Error('이 페이지의 스크립트가 아닙니다.');
     // Permanent removal is available only in the extension's library, never via a page message.
     if (message.type !== 'scripts:archive' && !ui) throw new Error('스크립트 보관함에서 실행하세요.');
     state = changeLibrary(state, message.type.slice('scripts:'.length), message.id);
     await chrome.storage.local.set({ [LIBRARY_KEY]: state });
+    if (message.type === 'scripts:delete' && preferences[message.id]) {
+      delete preferences[message.id]; await chrome.storage.local.set({[FIELD_PREFERENCES_KEY]:preferences});
+    }
     await localScripts.sync(await catalog());
   }
   const ids = new Set(available.map(script => script.id));
-  const view = { ready: true, available: available.filter(script => !script.unavailable).map(script => script.id), archived: state.archived.filter(id => ids.has(id)), deleted: state.deleted.filter(id => ids.has(id)) };
+  const view = { ready: true, fieldPreferences: Object.fromEntries(Object.entries(preferences).filter(([id]) => ids.has(id) && !state.deleted.includes(id))), available: available.filter(script => !script.unavailable).map(script => script.id), archived: state.archived.filter(id => ids.has(id)), deleted: state.deleted.filter(id => ids.has(id)) };
   return ui ? { ...view, catalog: all.filter(script => !state.deleted.includes(script.id)) } :
     { ...view, siteEnabled: siteEnabled(await readSites(), siteOrigin(sender.url)) };
 }
@@ -175,6 +209,7 @@ async function setSite(message) {
       recording.note = '이 사이트에 적용을 OFF로 전환해 기록을 끝냈습니다.';
       await write(recording);
       await chrome.tabs.sendMessage(recording.tabId, { type: 'capture:state', recordingId: null }).catch(() => {});
+      await framePermissions.close();
     }
   }
   // Storage events also update the other tabs of this site.
@@ -213,16 +248,20 @@ async function start(message) {
     state.status = 'error'; state.error = error.message; await write(state);
     throw new Error('기록기를 연결하지 못했습니다. 페이지를 새로고침하고 다시 시작하세요. ' + error.message);
   }
-  return state;
+  await framePermissions.review(info.tabId);
+  return await read();
 }
 async function handle(message, sender) {
+  if (['studio:open','library:open','local:open','panel:open'].includes(message.type))
+    return openPanel(message, sender, message.type === 'panel:open' ? message.page : ({'studio:open':'studio','library:open':'library','local:open':'scripts'})[message.type]);
+  if (message.type === 'recording:permission-prompt') return openPanel(message, sender, 'studio');
   // Keep sidePanel.open in the original click gesture; other requests wait for
   // the recording/draft checkpoint to be restored after a reload.
   if (message.type !== 'studio:open') await sessionReady;
   if (applyingUpdate && ['recording:start', 'studio:activate', 'local:run', 'local:connect'].includes(message.type)) {
     throw new Error('업데이트를 적용하는 중입니다. 잠시 후 다시 실행하세요.');
   }
-  if (['scripts:state', 'scripts:archive', 'scripts:restore', 'scripts:delete'].includes(message.type)) return scripts(message, sender);
+  if (['scripts:state', 'scripts:rename', 'scripts:field', 'scripts:archive', 'scripts:restore', 'scripts:delete'].includes(message.type)) return scripts(message, sender);
   if (message.type === 'local:connect' && sender.id === chrome.runtime.id && sender.tab) {
     try { return await localScripts.connect(sender) || {}; }
     catch (error) { return { error: error.message }; }
@@ -246,12 +285,35 @@ async function handle(message, sender) {
     }
     return { recordingId: allowed(state, sender) ? state.id : null };
   }
+  if (message.type === 'capture:context') {
+    const state = await read();
+    if (!allowed(state,sender) || message.recordingId !== state.id) return {ignored:true};
+    const context=normalizeFieldContext(message.context,{url:sender.url,frameId:sender.frameId});
+    if (!context?.fields.length) return {ignored:true};
+    const contexts=state.fieldContexts ||= [];
+    let existing=contexts.find(item=>item.frameId===context.frameId && item.page.url===context.page.url);
+    if (!existing && contexts.length<20) { existing={...context,fields:[]};contexts.push(existing); }
+    if (!existing) return {ignored:true};
+    const known=new Set(existing.fields.map(field=>JSON.stringify(field)));
+    let count=contexts.reduce((sum,item)=>sum+item.fields.length,0);
+    for (const field of context.fields) {
+      const key=JSON.stringify(field);
+      if (count>=600) break;
+      if (!known.has(key)) {existing.fields.push(field);known.add(key);count++;}
+    }
+    await write(state);return {ok:true};
+  }
   if (message.type === 'capture:event') {
     const state = await read();
     if (!allowed(state, sender) || message.recordingId !== state.id) return { ignored: true };
     if (state.steps.length >= MAX_STEPS) return { ignored: true, limit: true };
     const step = normalizeEvent(message.event, { url: sender.url, frameId: sender.frameId });
     if (!step) return { ignored: true };
+    if (step.action === 'dblclick') {
+      const preceding=state.steps.slice(-2),now=Date.now();
+      if (preceding.length===2 && preceding.every(previous=>previous.action==='click' && previous.frameId===step.frameId &&
+        previous.page.url===step.page.url && JSON.stringify(previous.target)===JSON.stringify(step.target) && now-Date.parse(previous.at)<1000)) state.steps.splice(-2);
+    }
     state.steps.push({ id: crypto.randomUUID(), at: new Date().toISOString(), ...step });
     if (state.steps.length === MAX_STEPS) {
       state.status = 'stopped'; state.stoppedAt = new Date().toISOString();
@@ -259,14 +321,6 @@ async function handle(message, sender) {
       await chrome.tabs.sendMessage(state.tabId, { type: 'capture:state', recordingId: null }).catch(() => {});
     }
     await write(state);
-    return { ok: true };
-  }
-  if (message.type === 'studio:open' && sender.id === chrome.runtime.id && sender.tab && sender.frameId === 0) {
-    await chrome.sidePanel.open({ tabId: sender.tab.id });
-    return { ok: true };
-  }
-  if (message.type === 'library:open' && sender.id === chrome.runtime.id && (controlPage(sender) || (sender.tab && sender.frameId === 0))) {
-    await chrome.tabs.create({ url: chrome.runtime.getURL('ui/library.html') });
     return { ok: true };
   }
   if (!controlPage(sender)) throw new Error('확장 프로그램 화면에서 실행하세요.');
@@ -287,9 +341,10 @@ async function handle(message, sender) {
           state.status = 'stopped'; await write(state);
           await chrome.tabs.sendMessage(state.tabId, { type: 'capture:state', recordingId: null }).catch(() => {});
         }
+        await framePermissions.close();
         await chrome.runtime.sendMessage({ type: 'studio:reset' }).catch(() => {});
         await chrome.storage.session.remove([KEY, 'macroStudioStudioDraft']);
-        await chrome.storage.local.remove([LIBRARY_KEY, SITES_KEY, UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, 'macroStudioResumeScriptsTab', 'macroStudioResumeUpdatePages']);
+        await chrome.storage.local.remove([LIBRARY_KEY, FIELD_PREFERENCES_KEY, SITES_KEY, UPDATE_PREFERENCES_KEY, AVAILABLE_UPDATE_KEY, 'macroStudioResumeScriptsTab', 'macroStudioResumeUpdatePages','macroStudioPanelRoutes']);
         // Clearing imported data must not revive scripts still bundled in an older build.
         const deleted = (await catalog()).map(script => script.id);
         if (deleted.length) await chrome.storage.local.set({ [LIBRARY_KEY]: { archived: [], deleted } });
@@ -306,8 +361,10 @@ async function handle(message, sender) {
     case 'site:set': return setSite(message);
     case 'local:status': return localScripts.status();
     case 'local:sync': return localScripts.sync(await catalog());
-    case 'local:open': return chrome.tabs.create({ url: chrome.runtime.getURL('ui/scripts.html') });
+    case 'local:rename': return localScripts.rename(message.id, message.name, await catalog());
+    case 'panel:remember': return rememberPanel(message.windowId, message.page);
     case 'studio:state': return await read();
+    case 'recording:permissions': return framePermissions.status(message.id);
     case 'frames:scan': {
       const { permitted, ...info } = await inspectFrames(chrome, message.tabId);
       return { ...info, siteEnabled: info.topAllowed && siteEnabled(await readSites(), info.origin) };
@@ -317,9 +374,12 @@ async function handle(message, sender) {
     case 'recording:stop': {
       const state = await read();
       if (!state || state.status !== 'recording') return state;
+      if (message.id && message.id !== state.id) throw new Error('기록이 변경됐습니다. 현재 작업실에서 확인하세요.');
       state.status = 'stopped'; state.stoppedAt = new Date().toISOString();
+      if (state.pendingFrameOrigins?.length) state.note = '내부 사이트 접근을 허용하기 전에 기록을 끝냈습니다. 해당 화면의 동작은 기록에 없을 수 있습니다.';
       await write(state);
       await chrome.tabs.sendMessage(state.tabId, { type: 'capture:state', recordingId: null }).catch(() => {});
+      await framePermissions.close();
       return state;
     }
     case 'recording:edit': {
@@ -348,7 +408,7 @@ async function handle(message, sender) {
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   // Preserve the user gesture for sidePanel.open; do not enqueue that request.
-  const operation = ['studio:open', 'local:run'].includes(message.type) ? handle(message, sender) : serial(() => handle(message, sender));
+  const operation = ['studio:open','library:open','local:open','panel:open','recording:permission-prompt','local:run'].includes(message.type) ? handle(message, sender) : serial(() => handle(message, sender));
   operation.then(value => respond({ ok: true, value }), error => respond({ ok: false, error: error.message }));
   return true;
 });
@@ -363,23 +423,8 @@ const configure = async (installed = false) => {
   else await chrome.alarms.create('macro-studio-build-check', { periodInMinutes: 0.5 });
   await localScripts.sync(await catalog());
   await refreshOpenTabs();
-  const { macroStudioResumeUpdatePages: pages = [] } = await chrome.storage.local.get('macroStudioResumeUpdatePages');
-  await chrome.storage.local.remove('macroStudioResumeUpdatePages');
-  for (const page of pages) {
-    if (!Number.isInteger(page.id) || !['/ui/studio.html', '/ui/scripts.html', '/ui/library.html'].includes(page.path)) continue;
-    const tab = await chrome.tabs.get(page.id).catch(() => null);
-    const url = chrome.runtime.getURL(page.path.slice(1));
-    if (!tab) await chrome.tabs.create({ url });
-    else if (tab.url?.split('?')[0] === url) await chrome.tabs.update(page.id, { url });
-  }
-  const { macroStudioResumeScriptsTab: tabId } = await chrome.storage.local.get('macroStudioResumeScriptsTab');
-  if (Number.isInteger(tabId)) {
-    await chrome.storage.local.remove('macroStudioResumeScriptsTab');
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    const url = chrome.runtime.getURL('ui/scripts.html') + '?updated=' + Date.now();
-    if (!tab) await chrome.tabs.create({ url }); // Chrome may close extension tabs during reload.
-    else if (tab.url?.startsWith(chrome.runtime.getURL('ui/scripts.html'))) await chrome.tabs.update(tabId, { url });
-  }
+  // Retire legacy tab-restoration keys. Internal screens now live only in the side panel.
+  await chrome.storage.local.remove(['macroStudioResumeUpdatePages','macroStudioResumeScriptsTab']);
 };
 chrome.runtime.onInstalled.addListener(() => configure(true).catch(console.error));
 chrome.runtime.onStartup.addListener(() => configure().catch(console.error));
@@ -388,7 +433,11 @@ if (STORE_BUILD) chrome.runtime.onUpdateAvailable?.addListener(details => {
   // Chrome owns installation. Do not force a reload while the user is recording or running a macro.
   if (version) chrome.storage.local.set({ [AVAILABLE_UPDATE_KEY]: { version } }).catch(console.error);
 });
-chrome.permissions.onAdded.addListener(() => serial(async () => { await registerCapture(); await localScripts.sync(await catalog()); await refreshOpenTabs(); }).catch(console.error));
+chrome.permissions.onAdded.addListener(() => serial(async () => {
+  await registerCapture(); await localScripts.sync(await catalog()); await refreshOpenTabs();
+  const state = await read();
+  if (state?.status === 'recording') await framePermissions.review(state.tabId);
+}).catch(console.error));
 chrome.permissions.onRemoved.addListener(() => {
   serial(async () => { await registerCapture(); await localScripts.sync(await catalog()); await refreshOpenTabs(); }).catch(console.error);
   serial(async () => {
@@ -398,6 +447,7 @@ chrome.permissions.onRemoved.addListener(() => {
     state.note = '사이트 권한이 변경되어 기록을 끝냈습니다.';
     await write(state);
     await chrome.tabs.sendMessage(state.tabId, { type: 'capture:state', recordingId: null }).catch(() => {});
+    await framePermissions.close();
   }).catch(console.error);
 });
 chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
@@ -405,6 +455,7 @@ chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
   if (state?.tabId === tabId && state.status === 'recording') {
     state.status = 'stopped'; state.stoppedAt = new Date().toISOString(); state.note = '기록하던 탭이 닫혔습니다.';
     await write(state);
+    await framePermissions.close();
   }
 }));
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -417,9 +468,15 @@ let navigationListening = false;
 function watchFrameNavigation() {
   if (navigationListening || !chrome.webNavigation?.onCompleted) return;
   try {
-    chrome.webNavigation.onCompleted.addListener(({ tabId }) => {
-      if (Number.isInteger(tabId) && tabId >= 0) chrome.runtime.sendMessage({ type: 'frames:changed', tabId }).catch(() => {});
-    });
+    const changed = ({ tabId }) => {
+      if (!Number.isInteger(tabId) || tabId < 0) return;
+      return serial(async () => {
+        await framePermissions.review(tabId).catch(() => {});
+        await chrome.runtime.sendMessage({ type: 'frames:changed', tabId }).catch(() => {});
+      });
+    };
+    chrome.webNavigation.onCommitted?.addListener(changed);
+    chrome.webNavigation.onCompleted.addListener(changed);
     navigationListening = true;
   } catch { /* Optional permission can still be unavailable until the user grants it. */ }
 }

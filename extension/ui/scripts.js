@@ -1,6 +1,6 @@
 import { scriptsLocation } from '../scripts/directory.js';
 import { readLocal, writeLocal } from '../scripts/store.js';
-import { folderReady, normalizeFolderPath, scriptsPath } from '../core/script-setup.js';
+import { folderReady, setupReady, normalizeFolderPath, scriptsPath } from '../core/script-setup.js';
 const $ = selector => document.querySelector(selector);
 let folder = await readLocal('folder'), folderEpoch = await readLocal('resetEpoch'), state = null, signature = '';
 let siteReadiness = null, setupSignature = '', pathDirty = false, editingPath = false;
@@ -23,29 +23,34 @@ function render(next) {
   const readyFolder = folderReady(next), baseReady = readyFolder && next.enabled;
   let confirmedPath = false;
   try { normalizeFolderPath(next.folderPath, next.folderName); confirmedPath = true; } catch {}
-  const site = siteReadiness || { ready: !!next.count && !(next.missingOrigins || []).length,
-    detail: (next.missingOrigins || []).length ? '아래에서 사용할 주소를 선택해 허용하세요' : next.count ? '필요한 사이트가 허용됐습니다' : '작업실에서 자동화할 사이트를 선택하세요' };
+  const site = siteReadiness || { ready: !(next.missingOrigins || []).length,
+    detail: (next.missingOrigins || []).length ? '아래에서 사용할 주소를 선택해 허용하세요' : '매크로에 필요한 사이트가 허용됐습니다' };
   const readiness = [
-    { title: '사용 폴더', ready: readyFolder, detail: next.connected ? (next.readable ? next.folderPath ? '폴더 읽기·저장 경로 확인 완료' : '아래에서 전체 경로를 확인하세요' : '읽기 권한을 다시 허용하세요') : '빈 폴더도 먼저 연결할 수 있습니다' },
+    { title: '사용 폴더', ready: readyFolder, detail: next.connected ? (next.writable ? next.folderPath ? '읽기·쓰기와 경로 확인 완료' : '아래에서 전체 경로를 확인하세요' : '읽기·쓰기 허용 필요') : '빈 폴더도 먼저 연결할 수 있습니다' },
     { title: '스크립트 실행', ready: !!next.enabled, detail: next.enabled ? 'Chrome 실행 허용 완료' : 'Chrome 설정에서 한 번 허용하세요' },
     { title: '사이트 접근', ready: baseReady && site.ready, detail: baseReady ? site.detail : '앞의 두 단계를 완료하면 설정할 수 있습니다' }
   ];
-  if (!$('#site-setup')) readiness.pop();
   const checklist = $('#setup-checklist');
   if (checklist && changed('checklist', readiness)) {
     checklist.replaceChildren();
     readiness.forEach((item, index) => {
       const row = document.createElement('li'), marker = document.createElement('span'), copy = document.createElement('div'), title = document.createElement('strong'), detail = document.createElement('small');
-      row.dataset.ready = String(!!item.ready); marker.className = 'setup-marker'; marker.textContent = item.ready ? '✓' : String(index + 1); marker.setAttribute('aria-hidden', 'true');
+      row.dataset.ready = String(!!item.ready); marker.className = 'setup-marker'; marker.setAttribute('aria-hidden', 'true');
+      if (item.ready) {
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        icon.setAttribute('viewBox', '0 0 24 24'); path.setAttribute('d', 'm5 12 4 4L19 6'); icon.append(path); marker.append(icon);
+      } else marker.textContent = String(index + 1);
       title.textContent = item.title; detail.textContent = item.detail;
       copy.append(title, detail); row.append(marker, copy); checklist.append(row);
     });
   }
   $('#script-permission-setup').hidden = !readyFolder || next.enabled;
   $('#folder-step').hidden = readyFolder && !editingPath;
-  $('#folder-step h2').textContent = !next.connected ? '매크로를 저장할 폴더를 선택하세요' : !next.readable ? '폴더 읽기를 다시 허용하세요' : editingPath ? '저장 경로 변경' : '저장 위치를 한 번 확인하세요';
+  $('#folder-step h2').textContent = !next.connected ? '매크로를 저장할 폴더를 선택하세요' : !next.writable ? '폴더 읽기·쓰기를 허용하세요' : editingPath ? '저장 경로 변경' : '저장 위치를 한 번 확인하세요';
   $('#connection-settings').hidden = !next.connected;
-  $('#setup-result').textContent = baseReady && (!$('#site-setup') || site.ready) ? '준비 완료' : '설정 필요';
+  $('#setup-section').dataset.ready = String(setupReady(next) && !editingPath && (!$('#site-setup') || site.ready));
+  $('#setup-continue')?.toggleAttribute('hidden', !setupReady(next));
+  $('#setup-result').textContent = baseReady && !(next.missingOrigins || []).length && (!$('#site-setup') || site.ready) ? '준비 완료' : '설정 필요';
   $('#script-settings').disabled = !readyFolder;
   $('#apply-script-settings').disabled = !readyFolder;
   $('#folder-path').disabled = !next.connected;
@@ -53,10 +58,12 @@ function render(next) {
   $('#folder-path-setup').hidden = !next.connected || (confirmedPath && !editingPath);
   $('#folder-location').hidden = !next.connected || !confirmedPath;
   $('#edit-folder-path').disabled = false;
-  $('#edit-folder-path').textContent = editingPath ? '경로 수정 닫기' : '경로 수정';
+  $('#edit-folder-path').setAttribute('aria-label', editingPath ? '경로 수정 닫기' : '저장 경로 수정');
+  $('#edit-folder-path').title = editingPath ? '경로 수정 닫기' : '저장 경로 수정';
   if (!pathDirty) $('#folder-path').value = next.folderPath || '';
   $('#folder-path-status').textContent = pathDirty ? '변경한 경로는 확인 버튼을 누른 뒤 사용합니다.' : confirmedPath ? '저장 경로 확인 완료' : '선택한 폴더의 전체 경로를 붙여넣고 확인하세요.';
   $('#script-target').textContent = confirmedPath ? scriptsPath(next.folderPath, next.folderRelativePath) : '';
+  $('#script-target').title = $('#script-target').textContent;
   if ($('#site-setup')) {
     $('#site-setup').hidden = !baseReady;
     $('#site-options').hidden = !baseReady;
@@ -69,17 +76,16 @@ function render(next) {
   $('#connect-folder').hidden = next.connected && next.readable;
   $('#connect-folder').textContent = next.connected ? '다른 폴더 선택' : '폴더 선택';
   $('#change-folder').disabled = $('#connect-folder').disabled;
-  $('#grant-folder').hidden = !next.connected || next.readable;
+  $('#grant-folder').hidden = !next.connected || next.writable;
   $('#grant-folder').disabled = false;
   $('#disconnect-folder').hidden = !next.connected;
-  $('#disconnect-folder').disabled = $('#sync-folder').disabled = false;
-  $('#sync-folder').textContent = '파일 반영 확인';
-  if (next.connected && !next.readable) say('폴더 읽기 권한을 다시 허용하세요.');
+  $('#disconnect-folder').disabled = false;
+  if (next.connected && !next.writable) say('');
   else if (next.error) say(next.error, true);
   else if (!next.connected) say(next.count ? '연결 중지됨 · 마지막으로 가져온 ' + next.count + '개는 계속 사용할 수 있습니다.' : '폴더부터 선택해 주세요.');
   else if (!confirmedPath) say(next.folderName + ' 선택됨 · 아래에서 저장 경로를 확인하세요.');
   else if (!next.enabled) say('Chrome 실행 허용을 완료하세요.');
-  else say('사용 폴더 연결 완료 · ' + next.count + '개');
+  else say('사용 폴더 연결 완료');
   $('#sync-detail').textContent = next.syncedAt ? '파일 반영: ' + new Date(next.syncedAt).toLocaleString() : '';
   const errors = [...(next.errors || []), ...(next.runtimeErrors || [])];
   if (changed('errors', errors)) {
@@ -98,21 +104,13 @@ function render(next) {
       label.append(checkbox, text); li.append(label); $('#script-origins').append(li);
     }
   }
-  $('#synced-count').textContent = next.count + '개';
-  $('#synced-empty').hidden = !!next.count;
-  if (changed('scripts', next.scripts || [])) {
-    $('#synced-scripts').replaceChildren();
-    for (const script of next.scripts || []) {
-      const li = document.createElement('li'), name = document.createElement('strong'), sites = document.createElement('small');
-      name.textContent = script.name; sites.textContent = script.matches.join(' · '); li.append(name, sites); $('#synced-scripts').append(li);
-    }
-  }
   permissionsControl();
   const detail = { ...next, folderReady: readyFolder };
   const currentSignature = JSON.stringify(detail);
   if (currentSignature !== setupSignature) {
     setupSignature = currentSignature;
     document.dispatchEvent(new window.CustomEvent('macro-studio:setup-state', { detail }));
+    if (setupReady(next) && window.parent !== window) window.parent.postMessage({type:'macro-studio:setup-ready'}, chrome.runtime.getURL('').replace(/\/$/,''));
   }
 }
 document.addEventListener('macro-studio:site-readiness', event => {
@@ -166,10 +164,10 @@ async function connectFolder() {
   // Keep the picker in the actual user gesture. Retain only the directory chosen by the user.
   try {
     const selectedEpoch = folderEpoch;
-    const selection = window.showDirectoryPicker({ id: 'macro-studio-scripts', mode: 'read' });
+    const selection = window.showDirectoryPicker({ id: 'macro-studio-scripts', mode: 'readwrite' });
     const selected = await selection;
     await scriptsLocation(selected);
-    if (await selected.queryPermission({ mode: 'read' }) !== 'granted') throw new Error('폴더 읽기가 허용되지 않았습니다.');
+    if (await selected.queryPermission({ mode: 'readwrite' }) !== 'granted') throw new Error('폴더 읽기·쓰기가 허용되지 않았습니다.');
     for await (const entry of selected.values()) { break; } // Confirm actual directory access, including an empty folder.
     const sameFolder = folder && await folder.isSameEntry(selected);
     await writeLocal({ folder: selected, ...(sameFolder ? {} : { folderPath: undefined }) }, selectedEpoch);
@@ -194,14 +192,14 @@ $('#save-folder-path').addEventListener('click', async () => {
     await writeLocal({ folderPath: path }, folderEpoch);
     pathDirty = false; editingPath = false;
     await refresh(true);
+    if (setupReady(state)) continueSetup();
   } catch (error) { $('#folder-path-status').textContent = error.message; }
 });
 $('#grant-folder').addEventListener('click', async () => {
-  const permission = folder?.requestPermission({ mode: 'read' });
-  try { if (await permission !== 'granted') throw new Error('폴더 읽기가 허용되지 않았습니다.'); await refresh(true); }
+  const permission = folder?.requestPermission({ mode: 'readwrite' });
+  try { if (await permission !== 'granted') throw new Error('폴더 읽기·쓰기가 허용되지 않았습니다.'); await refresh(true); }
   catch (error) { say(error.message, true); }
 });
-$('#sync-folder').addEventListener('click', () => refresh(true));
 $('#disconnect-folder').addEventListener('click', async () => { await writeLocal({ folder: undefined, folderPath: undefined }); folder = null; pathDirty = false; editingPath = false; await refresh(true); });
 $('#grant-script-origins').addEventListener('click', async () => {
   const origins = (state?.missingOrigins || []).filter(origin => checked.has(origin));
@@ -218,3 +216,14 @@ chrome.storage.onChanged?.addListener((changes, area) => {
 chrome.permissions.onAdded?.addListener(() => refresh(true));
 chrome.permissions.onRemoved?.addListener(() => refresh(true));
 await refresh(true);
+
+function continueSetup() {
+  if (setupReady(state) && window.parent !== window) window.parent.postMessage({type:'macro-studio:setup-continue'}, chrome.runtime.getURL('').replace(/\/$/,''));
+}
+$('#setup-continue')?.addEventListener('click', continueSetup);
+window.addEventListener('message', event => {
+  if (event.source !== window.parent || event.origin !== chrome.runtime.getURL('').replace(/\/$/,'') || event.data?.type !== 'macro-studio:edit-folder') return;
+  editingPath = true; pathDirty = false;
+  if (state) render(state);
+  $('#folder-path').focus();
+});

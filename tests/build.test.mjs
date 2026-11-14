@@ -88,7 +88,7 @@ test('builds ignore undeclared settings and reference assets; only explicit pers
   assert.match(await fs.readFile(path.join(store.output, 'core/distribution.js'), 'utf8'), /STORE_BUILD = true/);
   for (const page of ['studio', 'scripts']) {
     const html = await fs.readFile(path.join(store.output, 'ui', page + '.html'), 'utf8');
-    assert.match(html, /빈 폴더를 만들어 선택/);
+    assert.match(html, /폴더를 선택하고 읽기·쓰기를 허용/);
     assert.match(html, /id="folder-path"/);
     assert.doesNotMatch(html, /macro-studio 폴더 자체|local\/scripts|이 저장소를 열고/);
     assert.match(html, /id="reload-extension"[^>]+hidden/);

@@ -2,10 +2,13 @@
 export function captureDefinitions(spec, load) {
   const registry = window.__macroStudioLocalRegistry ||= new Map();
   const describe = item => [...item.definitions.values()].map(definition => ({
-    id: definition.id, name: String(definition.name || spec.id).slice(0, 100), description: String(definition.description || '').slice(0, 300),
+    id: definition.id, name: String(spec.name || definition.name || spec.id).slice(0, 100), description: String(definition.description || '').slice(0, 300),
     note: String(definition.note || '').slice(0, 2000), actionLabel: String(definition.actionLabel || '실행').slice(0, 80),
-    fields: (definition.fields || []).slice(0, 30).map(field => ({ name: String(field.name), label: String(field.label || field.name), type: String(field.type || 'text'),
-      required: !!field.required, value: String((typeof field.value === 'function' ? field.value() : field.value) ?? '') })),
+    fields: (definition.fields || []).slice(0, 60).map(field => ({ name: String(field.name), label: String(field.label || field.name), type: String(field.type || 'text'),
+      required: !!field.required, value: String((typeof field.value === 'function' ? field.value() : field.value) ?? ''),
+      ...(field.type === 'select' ? { options: (field.options || []).slice(0, 100).map(option => ({
+        value: String(option.value).slice(0, 2000), label: String(option.label ?? option.value).slice(0, 100),
+      })) } : {}) })),
     summary: (definition.summary || []).slice(0, 50).map(row => row.map(value => String(value))),
     local: { key: spec.key, revision: spec.revision, world: spec.world, id: spec.id }
   }));
@@ -32,10 +35,17 @@ export function compileSource(spec, sources) {
   return '(' + captureDefinitions.toString() + ')(' + JSON.stringify(spec) + ',function(){\n' + sources.join('\n;\n') + '\n});';
 }
 export async function invokeDefinition({ key, revision, id, values, requestId }) {
+  try {
   const entry = window.__macroStudioLocalRegistry?.get(key), definition = entry?.definitions.get(id);
   if (!definition || entry.revision !== revision) throw new Error('스크립트가 변경됐습니다. 목록에서 다시 선택하세요.');
   const report = message => document.getElementById('macro-studio-launcher')?.dispatchEvent(new CustomEvent('macro-studio:script-progress', {
     detail: JSON.stringify({ requestId, message: String(message).slice(0, 2000) })
   }));
-  return String(await definition.run(values, report) || '완료했습니다.');
+  const value = String(await definition.run(values, report) || '완료했습니다.');
+  return JSON.stringify({ protocol: 'macro-studio-run-v1', status: 'completed', value });
+  } catch (error) {
+    // Return errors as plain data too: a rejected injected promise can lose its
+    // error detail when Chrome serializes the execution result.
+    return JSON.stringify({ protocol: 'macro-studio-run-v1', status: 'failed', error: String(error?.message || error).slice(0, 4000) });
+  }
 }

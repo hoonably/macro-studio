@@ -9,12 +9,24 @@ import { matchesSite, LIBRARY_KEY } from '../extension/core/script-library.js';
 function missing() { const error = new Error('파일 없음'); error.name = 'NotFoundError'; return error; }
 function directory(name, entries = {}) {
   return { name, kind: 'directory', entries, permission: 'granted', async queryPermission() { return this.permission; },
+    async isSameEntry(other) { return other === this; },
     async *values() { yield* Object.values(this.entries); },
     async getDirectoryHandle(key) { if (this.entries[key]?.kind !== 'directory') throw missing(); return this.entries[key]; },
     async getFileHandle(key) { if (this.entries[key]?.kind !== 'file') throw missing(); return this.entries[key]; }
   };
 }
-function file(name, text) { return { name, kind: 'file', content: text, async getFile() { return { size: this.content.length * 2, text: async () => this.content }; } }; }
+function file(name, text) { return { name, kind: 'file', content: text,
+  async getFile() { const content = this.content; return { size: content.length * 2, text: async () => content }; },
+  async createWritable() {
+    const handle = this; let staged;
+    await handle.onOpen?.();
+    return {
+      async write(value) { if (handle.failWrite) throw new Error('디스크 저장 실패'); staged = value; await handle.onWrite?.(); },
+      async close() { handle.content = staged; handle.commits = (handle.commits || 0) + 1; },
+      async abort() { handle.aborted = true; }
+    };
+  }
+}; }
 function script(id, source, site = 'https://example.test/*', world = 'ISOLATED') {
   return directory(id, { 'script.json': file('script.json', JSON.stringify({ id, name: id, entries: [{ matches: [site], world, adapters: [], files: ['script.js'] }] })), 'script.js': file('script.js', source) });
 }
@@ -127,9 +139,11 @@ test('source changes register without extension reload, mount on an existing pag
   app.applyLibraryState({ ready: true, available: ['task'], archived: [], deleted: [] });
   const host = env.ui.document.getElementById('macro-studio-launcher');
   assert.equal(host.hidden, false); assert.equal(host.shadowRoot.querySelector('strong').textContent, 'Macro Studio');
-  assert.equal(host.shadowRoot.querySelector('.script-copy strong').textContent, '첫 버전');
+  assert.equal(host.shadowRoot.querySelector('.script-copy strong').textContent, 'task');
   const oldRevision = env.memory.snapshot.entries[0].revision;
   env.folder.entries.task.entries['script.js'].content = source('task', '수정 버전');
+  const metadata = JSON.parse(env.folder.entries.task.entries['script.json'].content);
+  env.folder.entries.task.entries['script.json'].content = JSON.stringify({...metadata,name:'수정 버전'});
   await env.runtime.sync(); await env.runtime.connect(env.sender);
   assert.equal(host.shadowRoot.querySelectorAll('.script').length, 1, 'Updating an id replaces it instead of adding duplicate buttons');
   assert.equal(host.shadowRoot.querySelector('.script-copy strong').textContent, '수정 버전');
@@ -163,7 +177,9 @@ test('MAIN scripts reuse site features without replacing the page launcher or le
 });
 
 test('isolated run bridge rejects forged DOM requests and accepts a real launcher submission only', async () => {
-  const env = await runtimeFixture(directory('scripts', { task: script('task', source('task', '클릭 테스트', 'window.runCount = (window.runCount || 0) + 1; return values.date;')) }));
+  const code = source('task', '클릭 테스트', 'window.runCount = (window.runCount || 0) + 1; return values.date;')
+    .replace("fields:[{name:'date',label:'날짜',value:'2026-10-24'}]", "fields:[{name:'date',label:'날짜',value:'2026-10-24'},{name:'time',label:'시간',type:'select',value:'09:00',options:[{value:'09:00',label:'오전 9:00'}]}]");
+  const env = await runtimeFixture(directory('scripts', { task: script('task', code) }));
   await env.runtime.sync();
   let runRequests = 0;
   env.ui.ctx.MutationObserver = env.ui.window.MutationObserver;
@@ -240,6 +256,7 @@ test('runs validate site and revision, refuse archived scripts and defer changed
   env.local[LIBRARY_KEY] = { archived: [], deleted: [] };
   const running = env.runtime.run(message, env.sender); await tick();
   assert.equal(await env.runtime.whenIdle(() => assert.fail('Running scripts must defer the extension update')), false);
+  await assert.rejects(env.runtime.rename('task', '실행 중 수정'), /실행 중인 매크로/);
   await assert.rejects(env.runtime.run(message, env.sender), /이미 실행/);
   env.folder.entries.task.entries['script.js'].content = source('task', '작업 후 반영');
   assert.equal((await env.runtime.sync()).revision, env.memory.snapshot.revision);
@@ -255,6 +272,80 @@ test('runs validate site and revision, refuse archived scripts and defer changed
   await env.runtime.sync(); assert.notEqual(env.memory.snapshot.entries[0].revision, entry.revision);
 });
 
+
+test('missing permissions for an internal entry block the whole macro before any execution', async () => {
+  const task = script('task', source('task'));
+  const manifest = JSON.parse(task.entries['script.json'].content);
+  manifest.entries.push({ ...manifest.entries[0], matches:['https://internal.test/*'], allFrames:true });
+  task.entries['script.json'].content = JSON.stringify(manifest);
+  const env = await runtimeFixture(directory('scripts', { task }));
+  await env.runtime.sync(); await env.runtime.connect(env.sender);
+  assert.equal((await env.runtime.catalog([]))[0].unavailable, true);
+  const entry = env.memory.snapshot.entries[0];
+  const request = { id:'task',key:entry.key,revision:entry.revision,requestId:'internal',values:{} };
+  const executions = env.calls.filter(call => call[0] === 'execute').length;
+  await assert.rejects(env.runtime.run(request, env.sender), /내부 화면 접근.*internal.test/);
+  assert.equal(env.calls.filter(call => call[0] === 'execute').length, executions);
+  assert.equal((await env.runtime.status()).running, false);
+  env.origins.push('https://internal.test/*');
+  await env.runtime.sync();
+  assert.equal((await env.runtime.catalog([]))[0].unavailable, false);
+  assert.equal(await env.runtime.run(request, env.sender), '실행 완료');
+});
+
+test('select fields preserve complete labels and string values through the personal script bridge', async () => {
+  const code = `window.MacroStudio.launcher.create().register({ id:'task', name:'시간 선택',
+    fields:[{name:'time',label:'시작 시간',type:'select',required:true,value:'09:30',
+      options:[{value:'09:30',label:'오전 9:30'},{value:'14:00',label:'오후 2:00 <b>표기</b>'}]}],
+    async run(values){return values.time;} });`;
+  const env = await runtimeFixture(directory('scripts', { task: script('task', code) }));
+  await env.runtime.sync(); await env.runtime.connect(env.sender);
+  const entry = env.memory.snapshot.entries[0];
+  const results = await env.browser.userScripts.execute({ target:{frameIds:[0]}, world:entry.world,
+    js:[{code:entry.code}] });
+  const field = results[0].result[0].fields[0];
+  assert.equal(field.type, 'select');
+  assert.equal(field.required, true);
+  assert.equal(field.value, '09:30');
+  assert.equal(field.options.length, 2);
+  assert.equal(field.options[1].label, '오후 2:00 <b>표기</b>');
+  assert.equal(field.options[1].value, '14:00');
+  const shadow = env.ui.document.getElementById('macro-studio-launcher').shadowRoot;
+  env.ui.window.MacroStudio.launcher.create().applyLibraryState({ ready: true, archived: [], deleted: [] });
+  shadow.querySelector('[data-script-id="task"]').click();
+  const select = shadow.querySelector('select[name="time"]');
+  assert.equal(select.value, '09:30');
+  assert.equal(select.options.length, 3);
+  assert.equal(select.options[2].textContent, '오후 2:00 <b>표기</b>');
+  assert.equal(select.querySelector('b'), null, 'Choice labels are never inserted as HTML');
+  assert.equal(await env.runtime.run({ id:'task', key:entry.key, revision:entry.revision,
+    requestId:'choice', values:{time:'14:00'} }, env.sender), '14:00');
+});
+
+test('missing execution results reject instead of reporting success and release the run lock', async () => {
+  const env = await runtimeFixture(directory('scripts', { task: script('task', source('task')) }));
+  await env.runtime.sync(); await env.runtime.connect(env.sender);
+  const entry = env.memory.snapshot.entries[0];
+  const message = { id: 'task', key: entry.key, revision: entry.revision, requestId: 'result-check', values: {} };
+  const execute = env.browser.userScripts.execute;
+  for (const result of [[], [{ frameId: 0 }], [{ frameId: 0, result: null }], [{ frameId: 0, result: {} }], [{ frameId:0, result:'old completion' }]]) {
+    env.browser.userScripts.execute = async () => result;
+    await assert.rejects(env.runtime.run(message, env.sender), /실행 완료를 확인하지 못/);
+    assert.equal((await env.runtime.status()).running, false);
+  }
+  env.browser.userScripts.execute = async () => [{ frameId: 0, error: '실제 입력 실패' }];
+  await assert.rejects(env.runtime.run(message, env.sender), /실제 입력 실패/);
+  env.browser.userScripts.execute = execute;
+  assert.equal(await env.runtime.run(message, env.sender), '실행 완료');
+  env.folder.entries.task.entries['script.js'].content = source('task', '반환값 없음', '');
+  await env.runtime.sync(); await env.runtime.connect(env.sender);
+  const updated = env.memory.snapshot.entries[0];
+  assert.equal(await env.runtime.run({ ...message, revision: updated.revision }, env.sender), '완료했습니다.');
+  env.folder.entries.task.entries['script.js'].content = source('task', '비동기 오류', 'await Promise.resolve(); throw new Error("입력 반영 실패");');
+  await env.runtime.sync(); await env.runtime.connect(env.sender);
+  const failed = env.memory.snapshot.entries[0];
+  await assert.rejects(env.runtime.run({ ...message, revision:failed.revision }, env.sender), /입력 반영 실패/);
+});
 
 test('reset drains a concurrent sync, removes imported sources and registrations, and cannot rehydrate', async () => {
   const env = await runtimeFixture(directory('scripts', { task: script('task', source('task')) }));
@@ -279,7 +370,7 @@ test('reset refuses running jobs and unavailable cleanup without deleting their 
   const entry = env.memory.snapshot.entries[0];
   let release, entered;
   const reached = new Promise(resolve => { entered = resolve; });
-  env.browser.userScripts.execute = async () => { entered(); return new Promise(resolve => { release = () => resolve([{ result: 'done' }]); }); };
+  env.browser.userScripts.execute = async () => { entered(); return new Promise(resolve => { release = () => resolve([{ result: JSON.stringify({ protocol:'macro-studio-run-v1', status:'completed', value:'done' }) }]); }); };
   const run = env.runtime.run({ id: 'task', key: entry.key, revision: entry.revision, requestId: 'test', values: {} }, env.sender);
   await reached;
   await assert.rejects(env.runtime.reset(async () => {}), /실행 중/);
@@ -291,4 +382,60 @@ test('reset refuses running jobs and unavailable cleanup without deleting their 
   env.enable(true);
   await env.runtime.reset(async () => {});
   assert.equal(env.memory.snapshot, undefined); assert.equal(env.registered.size, 0);
+});
+
+test('renaming saves only metadata, refreshes the launcher name, and survives a new runtime', async () => {
+  const task = script('task', source('task'));
+  const metadata = task.entries['script.json'], before = JSON.parse(metadata.content), originalCode = task.entries['script.js'].content;
+  const env = await runtimeFixture(directory('scripts', {task}), {folderPath:'/Users/example/scripts'});
+  await env.runtime.sync();
+  const previous = env.memory.snapshot.entries[0].revision;
+  assert.equal((await env.runtime.status()).writable, true);
+  await env.runtime.rename('task', '새 매크로 이름');
+  assert.deepEqual(JSON.parse(metadata.content), {...before,name:'새 매크로 이름'});
+  assert.equal(task.entries['script.js'].content, originalCode);
+  assert.notEqual(env.memory.snapshot.entries[0].revision, previous);
+  const connected = await env.runtime.connect(env.sender);
+  assert.equal(connected.error, '');
+  const stored = env.user.window.__macroStudioLocalRegistry.get('task/0');
+  assert.equal(stored.definitions.get('task').name, '첫 버전', 'The original script remains unchanged');
+  const catalog = await createScriptRuntime(env.browser, env.options).catalog([]);
+  assert.equal(catalog[0].name, '새 매크로 이름');
+  const host = env.ui.document.getElementById('macro-studio-launcher');
+  env.ui.window.MacroStudio.launcher.app.applyLibraryState({ready:true,available:['task'],archived:[],deleted:[]});
+  assert.equal(host.shadowRoot.querySelector('.script-copy strong').textContent, '새 매크로 이름');
+});
+
+test('rename rejects revoked write access, invalid names and ids, and preserves files after write failures or concurrent edits', async () => {
+  const task = script('task', source('task')), folder = directory('scripts', {task});
+  const env = await runtimeFixture(folder, {folderPath:'/Users/example/scripts'});
+  await env.runtime.sync();
+  const metadata = task.entries['script.json'], original = metadata.content;
+  folder.queryPermission = async ({mode}) => mode === 'readwrite' ? 'prompt' : 'granted';
+  assert.equal((await env.runtime.status()).readable, true);
+  assert.equal((await env.runtime.status()).writable, false);
+  await assert.rejects(env.runtime.rename('task','변경'), /사용 준비/);
+  folder.queryPermission = async () => 'granted';
+  for (const [id,name] of [['../task','이름'],['task',' '],['task','a'.repeat(101)],['task','두\n줄']]) await assert.rejects(env.runtime.rename(id,name));
+  assert.equal(metadata.content,original);
+  metadata.failWrite = true;
+  await assert.rejects(env.runtime.rename('task','새 이름'), /디스크 저장 실패/);
+  assert.equal(metadata.content,original); assert.equal(metadata.aborted,true);
+  metadata.failWrite = false;
+  metadata.onWrite = async () => { metadata.content = JSON.stringify({...JSON.parse(original),name:'외부 편집'}); };
+  await assert.rejects(env.runtime.rename('task','새 이름'), /변경됐습니다/);
+  assert.equal(JSON.parse(metadata.content).name,'외부 편집');
+  assert.equal(metadata.commits,undefined);
+});
+
+test('common field controls support up to sixty exposed knobs without truncating execution values at thirty',async()=>{
+ const source=`window.MacroStudio.launcher.create().register({id:'task',name:'다수 입력',fields:Array.from({length:65},(_,i)=>({name:'field'+i,label:'항목 '+i,value:String(i)})),async run(values){return String(Object.keys(values).length);}});`;
+ const env=await runtimeFixture(directory('scripts',{task:script('task',source)}));await env.runtime.sync();await env.runtime.connect(env.sender);
+ const app=env.ui.window.MacroStudio.launcher.app;app.applyLibraryState({ready:true,available:['task'],archived:[],deleted:[]});
+ const root=env.ui.document.getElementById('macro-studio-launcher').shadowRoot;root.querySelector('.script').click();
+ assert.equal(root.querySelectorAll('.fields input').length,60);
+ const entry=env.memory.snapshot.entries[0],values=Object.fromEntries(Array.from({length:60},(_,i)=>['field'+i,String(i)]));
+ const message={id:'task',key:entry.key,revision:entry.revision,requestId:'many-fields',values};
+ assert.equal(await env.runtime.run(message,env.sender),'60');
+ await assert.rejects(env.runtime.run({...message,values:{...values,extra:'61'}},env.sender),/입력값/);
 });

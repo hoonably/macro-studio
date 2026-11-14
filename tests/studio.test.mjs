@@ -6,8 +6,8 @@ import { agentPrompt, exportRecording, MAX_STEPS, normalizeEvent } from '../exte
 import { sitePattern } from '../extension/recorder/frames.js';
 import { folderReady, scriptsPath } from '../extension/core/script-setup.js';
 
-async function studio({ enabled = false, sites = [], initialRecording = null, session = {}, setup = {
-  connected: true, readable: true, enabled: true, folderName: 'scripts', folderPath: '/Users/example/MyMacros/scripts', folderRelativePath: []
+async function studio({ enabled = false, sites = [], initialRecording = null, session = {}, clipboardWrite = async()=>{}, setup = {
+  connected: true, readable: true, writable: true, enabled: true, folderName: 'scripts', folderPath: '/Users/example/MyMacros/scripts', folderRelativePath: []
 } } = {}) {
   let active = { id: 42, url: 'https://example.test/form' }, recording = structuredClone(initialRecording), approve = true, gesture = false, poll, listener, activated, clipboardFailure = false;
   const permissionCalls = [], messages = [], copied = [];
@@ -49,10 +49,10 @@ async function studio({ enabled = false, sites = [], initialRecording = null, se
         return true;
       }, onAdded: { addListener() {} }, onRemoved: { addListener() {} }
     },
-    tabs: { query: async () => [active], onActivated: { addListener: callback => { activated = callback; } }, onUpdated: { addListener() {} } },
+    tabs: { sendMessage:async()=>({ok:true}),query: async () => [active], onActivated: { addListener: callback => { activated = callback; } }, onUpdated: { addListener() {} } },
     storage: { session: { get: async key => ({ [key]: session[key] }), set: async values => Object.assign(session, values) }, onChanged: { addListener() {} } }
   };
-  const navigator = { clipboard: { writeText: async value => { if (clipboardFailure) throw new Error('Clipboard unavailable'); copied.push(value); } } };
+  const navigator = { clipboard: { writeText: async value => { if (clipboardFailure) throw new Error('Clipboard unavailable'); await clipboardWrite(value);copied.push(value); } } };
   const env = context(await code('extension/ui/studio.html'), { STORE_BUILD: false, chrome, navigator, URL, agentPrompt, exportRecording, MAX_STEPS, sitePattern, folderReady, scriptsPath,
     setInterval: callback => { poll = callback; return 1; } });
   await vm.runInContext('(async () => {' + (await code('extension/ui/studio.js')).replace(/^import[^\n]+\n/gm, '') + '\n})()', env.ctx);
@@ -98,8 +98,13 @@ test('changing to an unreadable site clears old grants and uses the recovered or
   const env = await studio({ enabled: true, sites: [
     { origin: 'https://child.test', pattern: 'https://child.test/*', frameIds: [2], allowed: false }
   ] });
-  assert.equal(env.document.querySelector('#start').disabled, true, 'Missing internal sites must first be allowed or explicitly excluded');
-  await env.click('#skip-frames'); await env.open();
+  assert.equal(env.document.querySelector('#start').disabled, true, 'Missing internal sites must first be allowed');
+  assert.equal(env.document.querySelector('#skip-frames'), null);
+  await env.open();
+  assert.equal(env.document.querySelector('#start').disabled, true, 'Opening creation cannot bypass the internal site permission gate');
+  const checkbox = env.document.querySelector('#frame-sites input');
+  checkbox.checked = true; checkbox.dispatchEvent(new env.window.Event('change'));
+  await env.click('#allow-frames'); await env.open();
   assert.equal(env.document.querySelector('#start').disabled, false);
   env.setFrameResult({ ok: false, error: '현재 탭의 주소를 확인할 수 없습니다. 도구모음에서 다시 열어주세요.' });
   await env.activate({ id: 99 });
@@ -107,7 +112,7 @@ test('changing to an unreadable site clears old grants and uses the recovered or
   assert.equal(env.document.querySelector('#frame-sites').children.length, 0);
   assert.equal(env.document.querySelector('#allow-frames').hidden, true);
   await env.click('#allow');
-  assert.equal(env.permissionCalls.length, 0, 'A missing URL must not reuse the previous site grant');
+  assert.equal(env.permissionCalls.length, 1, 'A missing URL must not reuse the previous site grant');
   env.setFrameResult({ ok: true, value: {
     tabId: 99, origin: 'https://when2jam.pages.dev', pattern: 'https://when2jam.pages.dev/*',
     topAllowed: false, detectionEnabled: true, frames: []
@@ -117,7 +122,7 @@ test('changing to an unreadable site clears old grants and uses the recovered or
   assert.equal(env.document.querySelector('#frame-status').dataset.error, 'false');
   assert.equal(env.document.querySelector('#start').disabled, true);
   await env.click('#allow');
-  assert.deepEqual(env.permissionCalls, [{ origins: ['https://when2jam.pages.dev/*'], permissions: [] }]);
+  assert.deepEqual(env.permissionCalls.at(-1), { origins: ['https://when2jam.pages.dev/*'], permissions: [] });
   assert.equal(env.document.querySelector('#start').disabled, false);
   assert.equal(env.messages.filter(message => message.type === 'studio:activate').at(-1).origin, 'https://when2jam.pages.dev');
 });
@@ -147,18 +152,21 @@ test('step deletion preserves remaining recording metadata and the collapsed pre
     ]
   } });
   await env.open();
-  const preview = env.document.querySelector('#preview'), variables = env.document.querySelector('#variables');
+  const preview = env.document.querySelector('#preview'), goal = env.document.querySelector('#goal');
   assert.equal(env.document.querySelectorAll('#steps select, #steps input').length, 0);
   assert.equal(preview.closest('details').open, undefined, 'Prompt details start collapsed');
   assert.equal(env.document.querySelector('#goal').value, '', 'Example text is a hint, not an automation instruction');
-  assert.equal(variables.value, '', 'Example variables are not included until the user enters them');
-  variables.value = '출장일, 출장 시간'; variables.dispatchEvent(new env.window.Event('input'));
+  goal.value = '출장일, 출장 시간을 조절할 수 있게 준비'; goal.dispatchEvent(new env.window.Event('input'));
   await env.click('#prompt');
   assert.equal(env.copied[0], preview.value);
-  assert.match(env.copied[0], /변경할 값: 출장일, 출장 시간/);
-  assert.match(env.copied[0], /mode=fixed여도 실행할 때 입력받도록/);
+  assert.equal(env.document.querySelector('#prompt').dataset.copyState,'success');
+  assert.equal(env.document.querySelector('#prompt-label').textContent,'복사됨');
+  assert.equal(preview.closest('details').open,undefined,'Copy success does not expand the preview');
+  assert.match(env.copied[0], /출장일, 출장 시간을 조절할 수 있게 준비/);
+  assert.match(env.copied[0], /mode=fixed여도 fields에 최대한 노출/);
   await env.click('#steps .step-delete');
   assert.equal(env.document.querySelector('#count').textContent, '1단계');
+  assert.equal(env.document.querySelector('#prompt').dataset.copyState,'idle','Deleting a step invalidates the copied content');
   const data = JSON.parse(preview.value.split('<recording-data>\n')[1].split('\n</recording-data>')[0]);
   assert.equal(data.steps[0].id, 'submit');
   assert.equal(data.steps[0].mode, 'manual');
@@ -167,28 +175,35 @@ test('step deletion preserves remaining recording metadata and the collapsed pre
   env.failClipboard(); await env.click('#prompt');
   assert.equal(selected, true, 'Clipboard failures select the visible preview after expanding the preview');
   assert.match(env.document.querySelector('#status').textContent, /직접 복사/);
+  assert.equal(env.document.querySelector('#prompt').dataset.copyState,'idle');
+  assert.equal(env.document.querySelector('#prompt-label').textContent,'에이전트용 지시문 복사');
 });
 
-test('studio descriptions and changing values survive an extension update and remain part of the copied prompt', async () => {
+test('studio descriptions survive updates and the removed changing-values draft migrates into the description once', async () => {
   const recording = { name: 'Original name', status: 'stopped', steps: [{ id: 'field', ...normalizeEvent({ action: 'input', page: { url: 'https://example.test/form' }, target: { label: 'date' }, value: '2026-10-24' }) }] };
   const env = await studio({ enabled: true, initialRecording: recording });
   await env.open();
-  for (const [id, value] of [['name', 'My task'], ['goal', 'Open form and stop before submit'], ['variables', 'date, time']]) {
+  for (const [id, value] of [['name', 'My task'], ['goal', 'Open form and stop before submit']]) {
     const input = env.document.getElementById(id); input.value = value; input.dispatchEvent(new env.window.Event('input'));
   }
   await tick();
+  env.session.macroStudioStudioDraft.variables = 'date, time';
   const reopened = await studio({ enabled: true, initialRecording: recording, session: env.session });
   await reopened.open();
   assert.equal(reopened.document.getElementById('name').value, 'My task');
-  assert.equal(reopened.document.getElementById('goal').value, 'Open form and stop before submit');
-  assert.equal(reopened.document.getElementById('variables').value, 'date, time');
+  const migrated = 'Open form and stop before submit\n\n입력 항목 참고: date, time';
+  assert.equal(reopened.document.getElementById('goal').value, migrated);
   await reopened.click('#prompt');
-  assert.match(reopened.copied[0], /변경할 값: date, time/);
+  assert.match(reopened.copied[0], /입력 항목 참고: date, time/);
+  await tick();
+  const again = await studio({ enabled:true, initialRecording:recording, session:reopened.session });
+  assert.equal(again.document.getElementById('goal').value, migrated);
+  assert.equal(again.session.macroStudioStudioDraft.variables, undefined);
 });
 
 test('creation and prompt copy require a connected readable folder, confirmed path and Chrome execution permission', async () => {
-  for (const change of [{ connected: false }, { readable: false }, { folderPath: '' }, { enabled: false }]) {
-    const setup = { connected: true, readable: true, enabled: true, folderName: 'scripts', folderPath: '/Users/example/scripts', ...change };
+  for (const change of [{ connected: false }, { readable: false }, { writable: false }, { folderPath: '' }, { enabled: false }]) {
+    const setup = { connected: true, readable: true, writable: true, enabled: true, folderName: 'scripts', folderPath: '/Users/example/scripts', ...change };
     const env = await studio({ enabled: true, setup });
     assert.equal(env.document.querySelector('#open-creation').disabled, true);
     assert.equal(env.document.querySelector('#macro-workspace').hidden, true);
@@ -230,4 +245,39 @@ test('retained host permission does not mark an OFF site ready; the explicit use
   assert.equal(env.messages.find(message => message.type === 'site:set').enabled, true);
   await env.open();
   assert.equal(env.document.querySelector('#macro-workspace').hidden, false);
+});
+
+
+test('stopping a nonempty recording leaves review collapsed and copy success resets when the instructions change',async()=>{
+  const env=await studio({enabled:true,initialRecording:{id:'recorded',tabId:42,name:'예시',status:'recording',steps:[{id:'field',...normalizeEvent({action:'change',page:{url:'https://example.test/form'},target:{label:'날짜'},value:'2026-11-14'})}]}});
+  await env.click('#stop');await env.open();
+  assert.equal(env.document.querySelector('#record-details'),null);
+  const preview=env.document.querySelector('#preview');
+  assert.equal(preview.closest('details').open,undefined);
+  assert.equal(env.document.querySelector('#steps').closest('details'),preview.closest('details'));
+  await env.click('#prompt');assert.equal(env.document.querySelector('#prompt-label').textContent,'복사됨');
+  const goal=env.document.querySelector('#goal');goal.value='수정한 목적';goal.dispatchEvent(new env.window.Event('input'));
+  assert.equal(env.document.querySelector('#prompt-label').textContent,'에이전트용 지시문 복사');
+  assert.equal(env.document.querySelector('#prompt').dataset.copyState,'idle');
+  await env.click('#prompt');assert.equal(env.document.querySelector('#prompt').dataset.copyState,'success');
+});
+
+
+test('a pending clipboard write does not show success or mark instructions edited during the write as copied',async()=>{
+  let complete,started;
+  const writing=new Promise(resolve=>{started=resolve});
+  const env=await studio({enabled:true,clipboardWrite:()=>{started();return new Promise(resolve=>{complete=resolve})},initialRecording:{name:'예시',status:'stopped',steps:[{id:'one',...normalizeEvent({action:'click',page:{url:'https://example.test/form'},target:{label:'열기'}})}]}});
+  await env.open();await env.click('#prompt');await writing;
+  assert.equal(env.document.querySelector('#prompt').dataset.copyState,'idle');
+  const goal=env.document.querySelector('#goal');goal.value='복사 도중 수정';goal.dispatchEvent(new env.window.Event('input'));
+  complete();await tick();
+  assert.equal(env.copied.length,1);
+  assert.equal(env.document.querySelector('#prompt').dataset.copyState,'idle');
+});
+
+test('completed preparation opens creation immediately and enables recording without an extra entry click',async()=>{
+ const env=await studio({enabled:true});
+ assert.equal(env.document.querySelector('#macro-workspace').hidden,false);
+ assert.equal(env.document.querySelector('#open-creation').hidden,true);
+ assert.equal(env.document.querySelector('#start').disabled,false);
 });

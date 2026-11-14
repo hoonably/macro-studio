@@ -1,11 +1,12 @@
-import { LOCAL_KEY, originPattern, readScripts, scriptsLocation } from './directory.js';
+import { LOCAL_KEY, originPattern, readScripts, scriptsLocation, validId, scriptMetadata } from './directory.js';
+import { folderReady } from '../core/script-setup.js';
 import { readLocal, writeLocal, resetLocal } from './store.js';
 import { compileSource, invokeDefinition } from './source.js';
 import { LIBRARY_KEY, libraryState, matchesSite } from '../core/script-library.js';
 
 const PREFIX = 'macro-studio-local-';
 // Bump when the generated user-code wrapper changes so saved snapshots are rebuilt too.
-const SOURCE_VERSION = 1;
+const SOURCE_VERSION = 4;
 const registrationValue = entry => JSON.stringify({ id: entry.id, matches: [...entry.matches].sort(), js: entry.js,
   allFrames: !!entry.allFrames, runAt: entry.runAt || 'document_idle', world: entry.world || 'USER_SCRIPT',
   worldId: entry.world === 'MAIN' ? null : entry.worldId || '' });
@@ -25,8 +26,8 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
   async function catalog(base) {
     const current = await snapshot();
     const enabled = current ? await available() : false;
-    return current ? [...base.filter(script => !script.bundled), ...current.scripts.map(script => ({ id: script.id, name: script.name,
-      matches: [...new Set(script.entries.flatMap(entry => entry.matches))], local: true, unavailable: !enabled }))] : base;
+    return current ? [...base.filter(script => !script.bundled), ...await Promise.all(current.scripts.map(async script => ({ id: script.id, name: script.name,
+      matches: [...new Set(script.entries.flatMap(entry => entry.matches))], local: true, unavailable: !enabled || !!(await missingOrigins([script])).length })))] : base;
   }
   async function missingOrigins(scripts) {
     const origins = [...new Set(scripts.flatMap(script => script.entries.flatMap(entry => entry.matches.map(originPattern))))];
@@ -35,9 +36,10 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
   }
   async function status() {
     const [folder, current, state, enabled, folderPath] = await Promise.all([read('folder'), snapshot(), chrome.storage.local.get(LOCAL_KEY), available(), read('folderPath')]);
-    let readable = false;
+    let readable = false, writable = false;
     try { readable = !!folder && await folder.queryPermission({ mode: 'read' }) === 'granted'; } catch {}
-    return { ...(state[LOCAL_KEY] || {}), connected: !!folder, folderName: folder?.name || current?.folderName || '', readable, enabled,
+    try { writable = !!folder && await folder.queryPermission({ mode: 'readwrite' }) === 'granted'; } catch {}
+    return { ...(state[LOCAL_KEY] || {}), connected: !!folder, folderName: folder?.name || current?.folderName || '', readable, writable, enabled,
       folderPath: folderPath || '', folderRelativePath: current?.folderRelativePath || [],
       count: current?.scripts.length || 0, scripts: (current?.scripts || []).map(script => ({ id: script.id, name: script.name, matches: [...new Set(script.entries.flatMap(entry => entry.matches))] })),
       revision: current?.revision || '', missingOrigins: await missingOrigins(current?.scripts || []), running: jobs.size > 0 };
@@ -105,7 +107,7 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
             const world = entry.world === 'MAIN' ? 'MAIN' : 'USER_SCRIPT', key = script.id + '/' + index;
             const sources = [...await Promise.all(entry.adapters.map(name => text('adapters/' + name + '.js'))), ...entry.files.map(path => script.files[path])];
             entries.push({ ...entry, world, scriptId: script.id, key, revision: version, registrationId: PREFIX + script.id + '-' + index,
-              code: compileSource({ id: script.id, key, revision: version, world }, sources) });
+              code: compileSource({ id: script.id, name: script.name, key, revision: version, world }, sources) });
           }
         }
         next = { scripts, entries, revision, folderName: folder.name, folderRelativePath: location.relativePath, syncedAt: new Date().toISOString() };
@@ -125,6 +127,45 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
     if (syncing) return syncing;
     syncing = syncImpl(base).finally(() => { syncing = null; });
     return syncing;
+  }
+  async function rename(id, value, base = []) {
+    const name = typeof value === 'string' ? value.trim() : '';
+    if (!validId(id) || !name || name.length > 100 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error('이름은 1–100자로 입력하세요.');
+    const saved = await whenIdle(async () => {
+      const state = await status();
+      if (!folderReady(state) || !state.enabled || state.missingOrigins.length) throw new Error('사용 준비에서 폴더와 실행 권한을 먼저 확인하세요.');
+      const current = await snapshot();
+      const deleted = libraryState((await chrome.storage.local.get(LIBRARY_KEY))[LIBRARY_KEY]).deleted;
+      if (!current?.scripts.some(script => script.id === id) || deleted.includes(id)) throw new Error('연결한 폴더의 매크로만 수정할 수 있습니다.');
+      const folder = await read('folder'), { directory } = await scriptsLocation(folder);
+      const handle = await (await directory.getDirectoryHandle(id)).getFileHandle('script.json');
+      const file = await handle.getFile();
+      if (file.size > 64000) throw new Error('script.json 파일이 너무 큽니다.');
+      const before = await file.text();
+      const metadata = JSON.parse(before);
+      if (!scriptMetadata(metadata, id).enabled) throw new Error('사용 중지된 매크로입니다. 파일을 새로 확인하세요.');
+      if (metadata.name === name) return true;
+      const indent = before.match(/\n([\t ]+)"/)?.[1] || '  ';
+      const after = JSON.stringify({ ...metadata, name }, null, indent) + (before.endsWith('\n') ? '\n' : '');
+      const writer = await handle.createWritable();
+      try {
+        // The stream commits atomically on close. Refuse a concurrent external edit
+        // or folder switch instead of replacing somebody else's newer metadata.
+        const selected = await read('folder');
+        if (!selected || !await folder.isSameEntry(selected) || await (await handle.getFile()).text() !== before)
+          throw new Error('파일이나 연결 폴더가 변경됐습니다. 새로고침한 뒤 다시 수정하세요.');
+        await writer.write(after);
+        const selectedAfterWrite = await read('folder');
+        if (!selectedAfterWrite || !await folder.isSameEntry(selectedAfterWrite) || await (await handle.getFile()).text() !== before)
+          throw new Error('파일이나 연결 폴더가 변경됐습니다. 새로고침한 뒤 다시 수정하세요.');
+        await writer.close();
+      } catch (error) { await writer.abort().catch(() => {}); throw error; }
+      return true;
+    });
+    if (!saved) throw new Error('실행 중인 매크로가 끝난 뒤 이름을 수정하세요.');
+    const result = await sync(base);
+    if (result.error) throw new Error('이름은 파일에 저장했지만 목록을 갱신하지 못했습니다. 파일을 새로고침하세요.');
+    return result;
   }
   async function connectImpl(sender) {
     const current = await snapshot();
@@ -165,7 +206,7 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
       (sender.frameId === 0 || entry.allFrames) && entry.matches.some(pattern => matchesSite(pattern, sender.url)));
     if (!entry || state.archived.includes(message.id) || state.deleted.includes(message.id)) throw new Error('사용할 수 없거나 변경된 스크립트입니다. 목록에서 다시 선택하세요.');
     const values = message.values;
-    if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).length > 30 ||
+    if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).length > 60 ||
       Object.values(values).some(value => typeof value !== 'string' || value.length > 2000)) throw new Error('입력값을 확인하세요.');
     if (typeof message.requestId !== 'string' || message.requestId.length > 100) throw new Error('잘못된 실행 요청입니다.');
     const job = sender.tab.id + '/' + sender.frameId;
@@ -174,11 +215,21 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
     jobs.add(job);
     try {
       if (!await available()) throw new Error('Chrome에서 사용자 스크립트 허용을 켜주세요.');
+      const script = current.scripts.find(script => script.id === entry.scriptId);
+      const missing = await missingOrigins([script]);
+      if (missing.length) throw new Error('설정에서 매크로에 필요한 사이트·내부 화면 접근을 먼저 허용하세요: ' + missing.join(', '));
       const args = { key: entry.key, revision: entry.revision, id: entry.scriptId, values, requestId: message.requestId };
       const result = await chrome.userScripts.execute({ target: { tabId: sender.tab.id, frameIds: [sender.frameId] }, world: entry.world,
         ...(entry.world === 'USER_SCRIPT' ? { worldId: 'macro-studio-local' } : {}), js: [{ code: '(' + invokeDefinition.toString() + ')(' + JSON.stringify(args) + ')' }] });
       if (result[0]?.error) throw new Error(result[0].error);
-      return result[0]?.result;
+      // Only a settled, acknowledged invocation is completion. This also carries
+      // script errors as serializable data instead of losing rejected promises.
+      let outcome;
+      try { outcome = JSON.parse(result[0]?.result); } catch { /* Reject below. */ }
+      if (outcome?.protocol === 'macro-studio-run-v1' && outcome.status === 'failed' && typeof outcome.error === 'string') throw new Error(outcome.error);
+      if (outcome?.protocol !== 'macro-studio-run-v1' || outcome.status !== 'completed' || typeof outcome.value !== 'string')
+        throw new Error('실행 완료를 확인하지 못했습니다. 화면 이동으로 작업이 중단됐을 수 있습니다. 현재 입력 상태를 확인하세요.');
+      return outcome.value;
     } finally { jobs.delete(job); }
   }
   async function reset(cleanup) {
@@ -218,5 +269,5 @@ export function createScriptRuntime(chrome, { read = readLocal, write = writeLoc
     if (Object.keys(values).length) await chrome.storage.session.set(values);
     await write({ updateSession: undefined });
   }
-  return { catalog, snapshot, status, sync, connect, run, reconcile, reset, whenIdle, preserveSession, restoreSession };
+  return { catalog, snapshot, status, sync, rename, connect, run, reconcile, reset, whenIdle, preserveSession, restoreSession };
 }

@@ -2,19 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { context, code, tick } from './helpers.mjs';
-import { folderReady, normalizeFolderPath, scriptsPath } from '../extension/core/script-setup.js';
+import { folderReady, setupReady, normalizeFolderPath, scriptsPath } from '../extension/core/script-setup.js';
 
 async function screen(enabled = true, page = 'scripts') {
-  let folder = null, granted = true, gesture = false, poll, permission = 'granted';
+  let folder = null, granted = true, gesture = false, poll, permission = 'granted', writePermission = 'granted';
   const memory = {};
-  const calls = [], selected = { name: 'scripts', requestPermission: async options => { assert.equal(gesture, true); calls.push(['read', structuredClone(options)]); permission = 'granted'; return permission; } };
-  selected.queryPermission = async () => permission;
+  const calls = [], selected = { name: 'scripts', requestPermission: async options => { assert.equal(gesture, true); calls.push(['read', structuredClone(options)]); permission = writePermission = 'granted'; return permission; } };
+  selected.queryPermission = async options => options.mode === 'readwrite' ? writePermission : permission;
   selected.values = async function* () {};
   selected.isSameEntry = async other => other === selected;
   const recording = { status: 'stopped', steps: [] };
   const state = { enabled, count: enabled ? 1 : 0, scripts: [{ id: 'task', name: '<img src=x> 이름', matches: ['https://new.test/*'] }], missingOrigins: ['https://new.test/*'] };
   const html = await code('extension/ui/' + page + '.html');
   const env = context(html);
+  env.window.parent = env.window;
   assert.match(html, /<script type="module" src="scripts.js"><\/script>/);
   if (page === 'studio') {
     assert.equal(env.document.querySelector('#manage-scripts'), null, 'Folder selection stays inside the studio');
@@ -26,31 +27,31 @@ async function screen(enabled = true, page = 'scripts') {
   const chrome = { runtime: { id: 'studio', reload: () => calls.push(['reload']), sendMessage: async message => {
     calls.push(['message', message.type]);
     if (message.type === 'update:reload') { calls.push(['reload']); return { ok: true, value: { applying: true } }; }
-    return { ok: true, value: message.type === 'studio:state' ? recording : { ...state, connected: !!folder, readable: permission === 'granted', folderName: folder?.name || '', folderPath: memory.folderPath || '' } };
+    return { ok: true, value: message.type === 'studio:state' ? recording : { ...state, connected: !!folder, readable: permission === 'granted', writable: permission === 'granted' && writePermission === 'granted', folderName: folder?.name || '', folderPath: memory.folderPath || '' } };
   } },
     storage: { local: { set: async value => calls.push(['store', structuredClone(value)]) } },
     tabs: { create: async value => calls.push(['tab', value]), getCurrent: async () => page === 'studio' ? undefined : ({ id: 42 }) }, permissions: { request: async options => { assert.equal(gesture, true); calls.push(['sites', options]); if (granted) state.missingOrigins = []; return granted; } } };
-  Object.assign(env.ctx, { STORE_BUILD: false, chrome, readLocal, writeLocal, scriptsLocation: async handle => ({ directory: handle, relativePath: [] }), folderReady, normalizeFolderPath, scriptsPath, setInterval: callback => { poll = callback; } });
+  Object.assign(env.ctx, { STORE_BUILD: false, chrome, readLocal, writeLocal, scriptsLocation: async handle => ({ directory: handle, relativePath: [] }), folderReady, setupReady, normalizeFolderPath, scriptsPath, setInterval: callback => { poll = callback; } });
   await vm.runInContext('(async () => {' + (await code('extension/ui/scripts.js')).replace(/^import[^\n]+\n/gm, '') + '\n})()', env.ctx);
   return { ...env, calls, state, recording, click: async selector => { gesture = true; env.document.querySelector(selector).click(); gesture = false; await tick(); },
-    poll: async () => { assert.equal(poll, undefined, 'Setup must not register a timer'); env.window.dispatchEvent(new env.window.Event('focus')); await tick(); }, deny: () => { granted = false; }, allow: () => { granted = true; }, revokeRead: () => { permission = 'prompt'; } };
+    poll: async () => { assert.equal(poll, undefined, 'Setup must not register a timer'); env.window.dispatchEvent(new env.window.Event('focus')); await tick(); }, deny: () => { granted = false; }, allow: () => { granted = true; }, revokeRead: () => { permission = writePermission = 'prompt'; }, revokeWrite: () => { writePermission = 'prompt'; } };
 }
 
 for (const page of ['scripts', 'studio']) {
 test(page + ': folder setup and site permission requests use actual gestures; focus refreshes and reconnecting do not request access', async () => {
   const env = await screen(true, page);
-  assert.equal(env.document.querySelector('#synced-scripts img'), null);
   await env.poll(); assert.equal(env.calls.filter(call => ['picker', 'sites', 'read'].includes(call[0])).length, 0);
   await env.click('#connect-folder');
   assert.equal(env.document.querySelector('#folder-path-setup').hidden, false);
   assert.equal(env.calls.some(call => call[0] === 'tab'), false, 'Selecting a folder does not open a separate page');
-  assert.deepEqual(env.calls.find(call => call[0] === 'picker')[1], { id: 'macro-studio-scripts', mode: 'read' });
+  assert.deepEqual(env.calls.find(call => call[0] === 'picker')[1], { id: 'macro-studio-scripts', mode: 'readwrite' });
   assert.match(env.document.querySelector('#script-state').textContent, /scripts/);
   env.document.querySelector('#folder-path').value = '/Users/example/scripts';
   await env.click('#save-folder-path');
   assert.match(env.document.querySelector('#script-target').textContent, /Users\/example\/scripts/);
   assert.equal(env.document.querySelector('#folder-path-setup').hidden, true, 'Confirmed paths hide the input and long instructions');
   assert.equal(env.document.querySelector('#folder-location').hidden, false);
+  assert.equal(env.document.querySelector('#setup-result').textContent, '설정 필요', 'Pending script origins cannot be reported as ready');
   await env.poll();
   assert.equal(env.document.querySelector('#folder-path-setup').hidden, true);
   await env.click('#edit-folder-path');
@@ -68,10 +69,11 @@ test(page + ': folder setup and site permission requests use actual gestures; fo
   env.revokeRead(); await env.poll();
   assert.equal(env.document.querySelector('#grant-folder').hidden, false);
   await env.click('#grant-folder'); assert.equal(env.document.querySelector('#grant-folder').hidden, true);
-  assert.deepEqual(env.calls.find(call => call[0] === 'read')[1], { mode: 'read' });
+  assert.deepEqual(env.calls.find(call => call[0] === 'read')[1], { mode: 'readwrite' });
   await env.click('#disconnect-folder');
   assert.match(env.document.querySelector('#script-state').textContent, /마지막으로 가져온 1개/);
 });
+
 
 test(page + ': first setup starts with folder selection, and applying updates protects current recordings and tasks', async () => {
   const env = await screen(false, page);
@@ -106,19 +108,33 @@ test(page + ': first setup starts with folder selection, and applying updates pr
 }
 
 test('setup refreshes preserve existing nodes, checked origins and an unfinished path edit', async () => {
-  const env = await screen();
+  const env = await screen(true, 'studio');
   await env.click('#connect-folder');
   const input = env.document.querySelector('#folder-path');
   input.value = '/Users/example/unfinished'; input.dispatchEvent(new env.window.Event('input'));
-  const row = env.document.querySelector('#setup-checklist li'), script = env.document.querySelector('#synced-scripts li');
+  const row = env.document.querySelector('#setup-checklist li');
   const checkbox = env.document.querySelector('#script-origins input');
   checkbox.checked = true; checkbox.dispatchEvent(new env.window.Event('change'));
   await env.poll(); await env.poll();
   assert.equal(env.document.querySelector('#setup-checklist li'), row);
-  assert.equal(env.document.querySelector('#synced-scripts li'), script);
   assert.equal(env.document.querySelector('#script-origins input'), checkbox);
   assert.equal(checkbox.checked, true);
   assert.equal(input.value, '/Users/example/unfinished');
   assert.equal(input.disabled, false);
   assert.equal(env.document.querySelector('#save-folder-path').disabled, false);
+});
+
+test('existing read access upgrades only on the explicit write grant; completed preparation shrinks to the path',async()=>{
+  const env=await screen(true,'studio');
+  await env.click('#connect-folder');env.document.querySelector('#folder-path').value='/Users/example/scripts';await env.click('#save-folder-path');
+  env.state.missingOrigins=[];await env.poll();
+  assert.equal(env.document.querySelector('#setup-section').dataset.ready,'true');
+  const grants=env.calls.filter(call=>call[0]==='read').length;
+  env.revokeWrite();await env.poll();
+  assert.equal(env.document.querySelector('#setup-section').dataset.ready,'false');
+  assert.equal(env.document.querySelector('#grant-folder').hidden,false);
+  assert.equal(env.calls.filter(call=>call[0]==='read').length,grants);
+  await env.click('#grant-folder');
+  assert.equal(env.document.querySelector('#setup-section').dataset.ready,'true');
+  assert.deepEqual(env.calls.filter(call=>call[0]==='read').at(-1)[1],{mode:'readwrite'});
 });

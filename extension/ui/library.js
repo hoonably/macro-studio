@@ -1,3 +1,4 @@
+import { scriptName } from './script-name-editor.js';
 const $ = selector => document.querySelector(selector);
 let state = { catalog: [], archived: [], deleted: [] }, busy = false, pendingDelete = null, revision = 0;
 let signature = '', selectedTab = 'active', undo = null;
@@ -35,7 +36,9 @@ function render() {
       const stored = state.archived.includes(script.id);
       const li = document.createElement('li'); li.className = 'script-card'; li.dataset.scriptId = script.id;
       const details = document.createElement('div'); details.className = 'script-details';
-      const name = document.createElement('strong'); name.textContent = script.name;
+      const name = scriptName(script, script.local ? async name => {
+        await request('local:rename', {id:script.id,name}); await refresh(); status('이름을 저장했습니다.');
+      } : null);
       const sites = document.createElement('p'); sites.className = 'script-sites';
       sites.textContent = [...new Set((script.matches || []).map(pattern => { try { return new URL(pattern.replace('://*.', '://')).host; } catch { return pattern; } }))].join(' · ');
       details.append(name, sites);
